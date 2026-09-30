@@ -1,0 +1,48 @@
+# ─── Gradle / build output ──────────────────────────────────────────────────
+.gradle/
+build/
+captures/
+out/
+
+# ─── NDK / native build output ──────────────────────────────────────────────
+.cxx/
+.externalNativeBuild/
+obj/
+native/build/
+
+# ─── Local machine config — MUST NOT be committed ───────────────────────────
+# Contains absolute SDK/NDK paths specific to one machine.
+local.properties
+
+# ─── Signing material — MUST NOT be committed ───────────────────────────────
+# Release keys live outside the repo. A leaked key lets anyone ship an update
+# that overwrites Thorcuts on users' devices.
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+release.properties
+
+# ─── IDE ────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ─── Editors / OS ───────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+*.swp
+*~
+
+# ─── Logs, crash dumps, profiling ───────────────────────────────────────────
+*.log
+hs_err_pid*
+replay_pid*
+
+# ─── Internal design docs (not published) ───────────────────────────────────
+docs/
+
+# ─── Scratch ────────────────────────────────────────────────────────────────
+scratch/
+tmp/
