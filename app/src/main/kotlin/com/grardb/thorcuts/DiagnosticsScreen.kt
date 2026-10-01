@@ -2,6 +2,7 @@ package com.grardb.thorcuts
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
@@ -61,6 +62,27 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Probe privilege")
+        }
+
+        HorizontalDivider()
+
+        Text("Screens", style = MaterialTheme.typography.labelMedium)
+        if (state.lastSwap.isNotBlank()) {
+            Text("Last swap: ${state.lastSwap}", style = MaterialTheme.typography.bodyMedium)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = vm::swapScreens, enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                Text("Swap")
+            }
+            OutlinedButton(onClick = vm::listTasks, enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                Text("List tasks")
+            }
+        }
+        if (state.taskList.isNotBlank()) {
+            Text(state.taskList, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.grardb.thorcuts
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -18,6 +19,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Logged so a screen swap can be checked for an Activity RECREATE, which
+        // task ids and ActivityRecord hashes cannot reveal: those are
+        // window-manager-side and survive a client-side config-change relaunch.
+        // The two panels are different sizes, so moving between them is exactly
+        // the configuration change that would trigger one. A second line with a
+        // different instance= value after a swap means the Activity was rebuilt
+        // and in-memory UI state was lost.
+        Log.i(
+            "ThorcutsDiag",
+            "ACTIVITY_CREATE instance=${System.identityHashCode(this)}" +
+                " savedState=${savedInstanceState != null}",
+        )
 
         // Lower this window's brightness only. See BurnIn.kt for why.
         dimWindow(window)
