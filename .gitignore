@@ -4,6 +4,14 @@ build/
 captures/
 out/
 
+# ─── Compiled native helper ─────────────────────────────────────────────────
+# Built by native/build.sh from native/src/, and shipped in releases rather than
+# tracked here: a binary blob in git is undiffable and unauditable, which matters
+# for a project that runs code as uid 0.
+# Build it before assembling the app, or the helper will be missing at runtime
+# (the app reports "helper binary missing at ..." rather than failing silently).
+app/src/main/jniLibs/**/*.so
+
 # ─── NDK / native build output ──────────────────────────────────────────────
 .cxx/
 .externalNativeBuild/
