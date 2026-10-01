@@ -2,12 +2,20 @@
  * thorcutsd — the Thorcuts input helper. Runs as uid 0, launched by the app
  * through AYN's pservice daemon.
  *
- * This build does NOT grab and does NOT emit: devices are opened read-only, so
- * nothing here can affect the user's controller. Grabbing arrives in a later
- * task, once the watchdog and panic path below are proven.
+ * It takes the gamepad and gpio-keys EXCLUSIVELY (EVIOCGRAB) and re-emits
+ * through virtual uinput twins, so Android sees only what the matcher allows
+ * through. From the grab onward, a missing FORWARD is a button that no longer
+ * works, and a crash while holding the grab is a handheld with no controller.
+ *
+ * Ordering is load-bearing: the twins are created BEFORE the grab, because
+ * grabbing with nowhere to re-emit leaves the controller dead with no route
+ * back. Teardown runs in reverse — release the real devices, then destroy the
+ * twins — so the controller is alive again even if tearing down a twin stalls.
  *
  * The invariant every exit path serves: never leave a device grabbed without a
- * live matcher.
+ * live matcher. Three things enforce it — the panic combo (checked in the
+ * matcher before any rule), the watchdog on the app socket, and an explicit
+ * stop.
  */
 #include "evdev.h"
 #include "matcher.h"
@@ -72,13 +80,34 @@ static void leave(const char *reason) {
     _exit(0);
 }
 
-/* Execute one matcher decision. Without a grab, FORWARD is a no-op: the kernel
-   already delivered the event to Android, because we never took it away. */
-static void apply(tc_decision d, bool *out_panic) {
+/* Report a condition once per run. A failing emit would otherwise either spam
+   the channel at input rate or, worse, say nothing at all — and "a button went
+   dead with no log" is the worst position to debug a grabbed controller from. */
+static void warn_once(bool *flag, const char *what) {
+    if (*flag) return;
+    *flag = true;
+    say("L WARNING %s — a control may be dead; stop the helper if input misbehaves", what);
+}
+
+/* Execute one matcher decision against the virtual devices.
+   Now that the real devices are grabbed, Android sees ONLY what is emitted here:
+   a missing FORWARD is a button that no longer works. */
+static void apply(tc_decision d, bool *out_panic, bool *out_dirty_pad, bool *out_dirty_gpio) {
+    tc_uinput *v = d.ev.dev == TC_DEV_GPIO ? &g_vgpio : &g_vpad;
+    bool *dirty = d.ev.dev == TC_DEV_GPIO ? out_dirty_gpio : out_dirty_pad;
+
     switch (d.kind) {
         case TC_FORWARD:
-        case TC_SWALLOW:
         case TC_SYNTH:
+            if (tc_uinput_emit(v, d.ev.type, d.ev.code, d.ev.value) == 0) {
+                *dirty = true;
+            } else {
+                static bool warned_emit = false;
+                warn_once(&warned_emit, "emit to a virtual device failed");
+            }
+            break;
+        case TC_SWALLOW:
+            /* Emit nothing: this is the whole point. The app under us never sees it. */
             break;
         case TC_FIRE:
             say("F %u", (unsigned)d.rule_id);
@@ -162,6 +191,12 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Grab LAST, once the twins are live. Grabbing before there is somewhere to
+       re-emit would leave the controller dead with no route back. */
+    if (g_pad.fd >= 0 && tc_grab(&g_pad) != 0) leave("cannot grab pad");
+    if (g_gpio.fd >= 0 && tc_grab(&g_gpio) != 0) leave("cannot grab gpio-keys");
+    say("L grabbed; Android now sees only the twins");
+
     say("R %d", opened);
 
     tc_state state;
@@ -238,6 +273,8 @@ int main(int argc, char **argv) {
                 say("L read error on %s", dev->path);
                 continue;
             }
+            bool dirty_pad = false;
+            bool dirty_gpio = false;
             for (int i = 0; i < n; i++) {
                 if (evs[i].type == EV_SYN) continue;
 
@@ -254,7 +291,18 @@ int main(int argc, char **argv) {
 
                 tc_out out = tc_step(&state, ev, now_ms());
                 deadline = out.deadline_ms;
-                for (uint8_t k = 0; k < out.n; k++) apply(out.items[k], &panic);
+                for (uint8_t k = 0; k < out.n; k++) {
+                    apply(out.items[k], &panic, &dirty_pad, &dirty_gpio);
+                }
+            }
+            /* One report per batch, per device that actually emitted something. */
+            if (dirty_pad && tc_uinput_syn(&g_vpad) != 0) {
+                static bool warned = false;
+                warn_once(&warned, "SYN_REPORT to the pad twin failed");
+            }
+            if (dirty_gpio && tc_uinput_syn(&g_vgpio) != 0) {
+                static bool warned = false;
+                warn_once(&warned, "SYN_REPORT to the keys twin failed");
             }
         }
         if (panic) leave("panic combo");
@@ -268,7 +316,19 @@ int main(int argc, char **argv) {
             tick.value = 0;
             tc_out out = tc_step(&state, tick, now_ms());
             deadline = out.deadline_ms;
-            for (uint8_t k = 0; k < out.n; k++) apply(out.items[k], &panic);
+            bool dirty_pad = false;
+            bool dirty_gpio = false;
+            for (uint8_t k = 0; k < out.n; k++) {
+                apply(out.items[k], &panic, &dirty_pad, &dirty_gpio);
+            }
+            if (dirty_pad && tc_uinput_syn(&g_vpad) != 0) {
+                static bool warned = false;
+                warn_once(&warned, "SYN_REPORT to the pad twin failed");
+            }
+            if (dirty_gpio && tc_uinput_syn(&g_vgpio) != 0) {
+                static bool warned = false;
+                warn_once(&warned, "SYN_REPORT to the keys twin failed");
+            }
             if (panic) leave("panic combo");
         }
 
