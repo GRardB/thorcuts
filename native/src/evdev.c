@@ -8,11 +8,14 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#define NLONGS(bits) (((bits) + (8 * sizeof(unsigned long)) - 1) / (8 * sizeof(unsigned long)))
-
-static bool has_bit(const unsigned long *bits, int code) {
+bool tc_has_bit(const unsigned long *bits, int code) {
     return (bits[code / (8 * sizeof(unsigned long))] >>
             (code % (8 * sizeof(unsigned long)))) & 1UL;
+}
+
+int tc_read_caps(int fd, int ev_type, unsigned long *bits, size_t nbytes) {
+    memset(bits, 0, nbytes);
+    return ioctl(fd, EVIOCGBIT(ev_type, nbytes), bits);
 }
 
 void tc_device_init(tc_device *d) {
@@ -22,20 +25,15 @@ void tc_device_init(tc_device *d) {
     d->path[0] = '\0';
 }
 
-static int read_caps(int fd, int ev_type, unsigned long *bits, size_t nbytes) {
-    memset(bits, 0, nbytes);
-    return ioctl(fd, EVIOCGBIT(ev_type, nbytes), bits);
-}
-
 /* The gamepad, identified by what it can DO: a south face button and a hat axis.
    That combination is unique to the pad among the Thor's input devices, and it
    survives AYN's layout switch. */
 static bool looks_like_pad(int fd) {
-    unsigned long keys[NLONGS(KEY_MAX + 1)];
-    unsigned long abs[NLONGS(ABS_MAX + 1)];
-    if (read_caps(fd, EV_KEY, keys, sizeof keys) < 0) return false;
-    if (read_caps(fd, EV_ABS, abs, sizeof abs) < 0) return false;
-    return has_bit(keys, BTN_SOUTH) && has_bit(abs, ABS_HAT0X);
+    unsigned long keys[TC_NLONGS(KEY_MAX + 1)];
+    unsigned long abs[TC_NLONGS(ABS_MAX + 1)];
+    if (tc_read_caps(fd, EV_KEY, keys, sizeof keys) < 0) return false;
+    if (tc_read_caps(fd, EV_ABS, abs, sizeof abs) < 0) return false;
+    return tc_has_bit(keys, BTN_SOUTH) && tc_has_bit(abs, ABS_HAT0X);
 }
 
 typedef bool (*matcher_fn)(int fd, const char *name, const void *arg);

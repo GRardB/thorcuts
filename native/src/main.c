@@ -12,6 +12,7 @@
 #include "evdev.h"
 #include "matcher.h"
 #include "net.h"
+#include "uinput.h"
 
 #include <poll.h>
 #include <signal.h>
@@ -27,6 +28,8 @@
 
 static tc_device g_pad;
 static tc_device g_gpio;
+static tc_uinput g_vpad;
+static tc_uinput g_vgpio;
 static int       g_sock = -1;
 static volatile sig_atomic_t g_signalled = 0;
 
@@ -36,10 +39,14 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* Release everything. Safe to call twice; runs from atexit and from signals. */
+/* Release everything. Safe to call twice; runs from atexit and from signals.
+   Order matters: ungrab the real devices FIRST, so the controller is alive again
+   even if destroying a virtual device somehow stalls. */
 static void release_all(void) {
     tc_close(&g_pad);
     tc_close(&g_gpio);
+    tc_uinput_destroy(&g_vpad);
+    tc_uinput_destroy(&g_vgpio);
 }
 
 static void on_signal(int sig) {
@@ -90,6 +97,8 @@ int main(int argc, char **argv) {
 
     tc_device_init(&g_pad);
     tc_device_init(&g_gpio);
+    tc_uinput_init(&g_vpad);
+    tc_uinput_init(&g_vgpio);
     atexit(release_all);
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -137,6 +146,21 @@ int main(int argc, char **argv) {
         say("L gpio-keys NOT FOUND");
     }
     if (opened == 0) leave("no input devices");
+
+    if (g_pad.fd >= 0) {
+        if (tc_uinput_create(&g_pad, "Thorcuts Gamepad", &g_vpad) == 0) {
+            say("L virtual pad created");
+        } else {
+            leave("cannot create virtual pad");
+        }
+    }
+    if (g_gpio.fd >= 0) {
+        if (tc_uinput_create(&g_gpio, "Thorcuts Keys", &g_vgpio) == 0) {
+            say("L virtual keys created");
+        } else {
+            leave("cannot create virtual keys");
+        }
+    }
 
     say("R %d", opened);
 

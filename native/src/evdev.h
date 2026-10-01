@@ -5,6 +5,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#define TC_NLONGS(bits) (((bits) + (8 * sizeof(unsigned long)) - 1) / (8 * sizeof(unsigned long)))
+
+/* Read a device's capability bitmap for [ev_type] into [bits]. */
+int  tc_read_caps(int fd, int ev_type, unsigned long *bits, size_t nbytes);
+bool tc_has_bit(const unsigned long *bits, int code);
+
 typedef struct {
     int  fd;
     bool grabbed;

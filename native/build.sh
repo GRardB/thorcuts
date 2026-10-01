@@ -23,7 +23,7 @@ OUT=../app/src/main/jniLibs/arm64-v8a/libthorcutsd.so
 mkdir -p "$(dirname "$OUT")"
 
 "$CC" -std=c11 -Wall -Wextra -Werror -O2 -fPIE -pie \
-    -o "$OUT" src/matcher.c src/net.c src/evdev.c src/main.c
+    -o "$OUT" src/matcher.c src/net.c src/evdev.c src/uinput.c src/main.c
 
 echo "built $OUT"
 ls -l "$OUT"
