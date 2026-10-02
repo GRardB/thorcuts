@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,19 +25,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /**
  * The M1 diagnostics screen. Deliberately dark and flat, with no Cards.
  *
- * This screen is parked on an AMOLED panel for long stretches while the device
- * tasks are verified, so it minimises lit pixels: a true-black background (black
- * pixels are OFF on AMOLED), mid-grey rather than near-white text, outlined rather
- * than filled buttons so there is no large solid block of colour, and the whole
- * layout slowly walks a few pixels so nothing holds one position. See BurnIn.kt.
+ * The look is all-dark throughout: a true-black background from the theme in
+ * [MainActivity], Material 3's dark defaults for the text, and outlined rather
+ * than filled buttons so there is no large solid block of colour.
  *
- * From Task 8 onward the live event log occupies most of the screen, which keeps
- * those pixels changing on their own.
+ * From Task 8 onward the live event log occupies most of the screen; the static
+ * controls take the other half and scroll on their own account.
  */
 @Composable
 fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val shift = rememberBurnInShift()
 
     // Root: NOT scrollable. verticalScroll here would give its children infinite
     // height and the weight()s below would stop working — see the inner Column
@@ -46,9 +42,12 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // The system bars are hidden, so respect the safe area ourselves.
+            // Kept although this app no longer opts into edge-to-edge: on the
+            // Thor (API 33) the system insets the window itself, so this adds
+            // nothing today. It becomes load-bearing on Android 15+, which forces
+            // edge-to-edge on anything targeting SDK 35 or above — and targetSdk
+            // here is 37. It also covers display cutouts either way.
             .safeDrawingPadding()
-            .offset(x = shift.x, y = shift.y)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -70,7 +69,6 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
             Text(
                 state.privilege,
                 style = MaterialTheme.typography.bodyMedium,
-                color = DIM_TEXT_EMPHASIS,
             )
             if (state.idOutput.isNotBlank()) {
                 Text(state.idOutput, style = MaterialTheme.typography.bodySmall)
@@ -124,11 +122,10 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
         HorizontalDivider()
 
         // The live log gets the other half of the panel outright, not merely
-        // whatever the static controls leave behind. It is the only large area
-        // of the screen, and its pixels change constantly as events arrive —
-        // which is what keeps a long diagnostics session off an AMOLED burn-in
-        // path. Newest first, so the interesting line is always on top and the
-        // list never needs auto-scrolling.
+        // whatever the static controls leave behind — it is the one part of this
+        // screen worth watching during a long session. Newest first, so the
+        // interesting line is always on top and the list never needs
+        // auto-scrolling.
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
