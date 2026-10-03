@@ -9,6 +9,7 @@
 
 void tc_uinput_init(tc_uinput *u) {
     u->fd = -1;
+    u->live = false;
     u->name[0] = '\0';
 }
 
@@ -20,7 +21,7 @@ static bool any_bit_set(const unsigned long *bits, int max) {
     return false;
 }
 
-int tc_uinput_create(const tc_device *src, const char *name, tc_uinput *out) {
+int tc_uinput_arm(const tc_device *src, const char *name, tc_uinput *out) {
     tc_uinput_init(out);
 
     int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
@@ -89,18 +90,31 @@ int tc_uinput_create(const tc_device *src, const char *name, tc_uinput *out) {
         }
     }
 
-    if (ioctl(fd, UI_DEV_CREATE) < 0) {
-        close(fd);
-        return -1;
-    }
-
     out->fd = fd;
+    out->live = false;
     snprintf(out->name, sizeof out->name, "%s", name);
     return 0;
 }
 
+int tc_uinput_fire(tc_uinput *u) {
+    if (u->fd < 0 || u->live) return -1;
+    if (ioctl(u->fd, UI_DEV_CREATE) < 0) return -1;
+    u->live = true;
+    return 0;
+}
+
+int tc_uinput_create(const tc_device *src, const char *name, tc_uinput *out) {
+    if (tc_uinput_arm(src, name, out) != 0) return -1;
+    if (tc_uinput_fire(out) != 0) {
+        close(out->fd);
+        tc_uinput_init(out);
+        return -1;
+    }
+    return 0;
+}
+
 int tc_uinput_emit(tc_uinput *u, uint16_t type, uint16_t code, int32_t value) {
-    if (u->fd < 0) return -1;
+    if (u->fd < 0 || !u->live) return -1;
     struct input_event ev;
     memset(&ev, 0, sizeof ev);
     ev.type = type;
@@ -115,7 +129,7 @@ int tc_uinput_syn(tc_uinput *u) {
 
 void tc_uinput_destroy(tc_uinput *u) {
     if (u->fd < 0) return;
-    ioctl(u->fd, UI_DEV_DESTROY);
+    if (u->live) ioctl(u->fd, UI_DEV_DESTROY);
     close(u->fd);
-    u->fd = -1;
+    tc_uinput_init(u);
 }

@@ -49,7 +49,7 @@ static bool match_name(int fd, const char *name, const void *arg) {
     return strcmp(name, (const char *)arg) == 0;
 }
 
-static int scan(matcher_fn match, const void *arg, tc_device *d) {
+static int scan_except(matcher_fn match, const void *arg, const char *exclude, tc_device *d) {
     DIR *dir = opendir("/dev/input");
     if (!dir) return -1;
 
@@ -60,6 +60,7 @@ static int scan(matcher_fn match, const void *arg, tc_device *d) {
 
         char path[64];
         snprintf(path, sizeof path, "/dev/input/%s", e->d_name);
+        if (exclude && strcmp(path, exclude) == 0) continue;
 
         int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) continue;
@@ -81,8 +82,16 @@ static int scan(matcher_fn match, const void *arg, tc_device *d) {
     return found;
 }
 
+static int scan(matcher_fn match, const void *arg, tc_device *d) {
+    return scan_except(match, arg, NULL, d);
+}
+
 int tc_open_pad(tc_device *d) {
-    return scan(match_pad, NULL, d);
+    return scan_except(match_pad, NULL, NULL, d);
+}
+
+int tc_open_pad_except(const char *exclude_path, tc_device *d) {
+    return scan_except(match_pad, NULL, exclude_path, d);
 }
 
 int tc_open_named(const char *name, tc_device *d) {

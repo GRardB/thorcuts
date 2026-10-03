@@ -26,6 +26,12 @@ void tc_device_init(tc_device *d);
    Returns 0 on success, -1 if not found. */
 int tc_open_pad(tc_device *d);
 
+/* As tc_open_pad, but skips [exclude_path] — which is how the helper avoids
+   matching its OWN clone. The clone copies the pad's capabilities exactly, so a
+   capability match cannot tell them apart; only the node path can. Pass NULL to
+   exclude nothing. */
+int tc_open_pad_except(const char *exclude_path, tc_device *d);
+
 /* Open the first device whose EVIOCGNAME matches [name] exactly. */
 int tc_open_named(const char *name, tc_device *d);
 
