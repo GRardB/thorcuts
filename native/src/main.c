@@ -20,14 +20,18 @@
 #include "evdev.h"
 #include "matcher.h"
 #include "net.h"
+#include "takeover.h"
 #include "uinput.h"
 
+#include <dirent.h>
+#include <linux/uinput.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -41,20 +45,65 @@ static tc_uinput g_vgpio;
 static int       g_sock = -1;
 static volatile sig_atomic_t g_signalled = 0;
 
+/* Set once the numbering has been DISTURBED — which is NOT the same as "the
+   takeover succeeded", and conflating the two was a defect. This flag was
+   `g_took_over` and was set for TC_TAKEOVER_OK alone, so the three OTHER results
+   that can hand the caller a pad already moved off number 1 never got their
+   restore and could leave AYN's pad at 2 for the rest of the boot.
+
+   What it means now: the trigger write landed, so the numbering is ours and we
+   owe the user a restore on the way out. See the per-result switch in main() for
+   which results set it and why. */
+static bool g_numbering_disturbed = false;
+
 static int64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* Release everything. Safe to call twice; runs from atexit and from signals.
-   Order matters: ungrab the real devices FIRST, so the controller is alive again
-   even if destroying a virtual device somehow stalls. */
+/* say() is defined below, after the socket is set up. release_all needs it to
+   report a failed restore, which is the one teardown outcome the user must be
+   told about. */
+static void say(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* Release everything. Safe to call twice; runs from leave() on every exit path.
+   Order matters and is not negotiable:
+     1. ungrab the real devices, so the controller is alive again immediately;
+     2. destroy the twins, freeing controller number 1;
+     3. restore AYN's pad to number 1, if we disturbed the numbering.
+   Ungrabbing is the time-critical act — the panic combo exists to make the
+   controller work again NOW — and must not wait behind the fork/exec in step 3.
+   Step 3 must follow step 2, or AYN's pad comes back at 2 all over again.
+
+   BUT TEARDOWN AS A WHOLE IS NOT INSTANT, and the panic path must not be read as
+   if it were. Step 3 is tc_pad_restore(), which DEREGISTERS the pad and waits the
+   measured 3 s gap before writing it back (see takeover.h). So after a panic the
+   user's controller works again at once, then disappears for ~3 s, then returns
+   at number 1. That is inherent to the only mechanism that moves the numbering,
+   not a bug — and the ungrab still goes first because it is free — but it is a
+   surprise in the hand, so it is written down here rather than discovered.
+
+   A pad left at 2 is WORSE than never having run: 2 is exactly what breaks the
+   emulators this whole feature exists to fix, and the user has no way to connect
+   the two facts. */
 static void release_all(void) {
     tc_close(&g_pad);
     tc_close(&g_gpio);
     tc_uinput_destroy(&g_vpad);
     tc_uinput_destroy(&g_vgpio);
+    if (g_numbering_disturbed) {
+        g_numbering_disturbed = false;
+        /* The result is NOT discarded. A return of 1 means the pad was
+           deregistered and did not come back, which is the one teardown outcome
+           the user has to act on — and the only way out of it is AYN's own
+           "Controller style" tile or a reboot. say() is a no-op once the socket
+           is gone, so this costs nothing on the paths where nobody is listening. */
+        if (tc_pad_restore() > 0) {
+            say("L RESTORE FAILED — AYN's pad may still be deregistered. Use "
+                "AYN's Controller style tile, or reboot.");
+        }
+    }
 }
 
 static void on_signal(int sig) {
@@ -118,11 +167,13 @@ static void apply(tc_decision d, bool *out_panic, bool *out_dirty_pad, bool *out
     }
 }
 
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: thorcutsd <abstract-socket-name>\n");
+        fprintf(stderr, "usage: thorcutsd <abstract-socket-name> [takeover]\n");
         return 2;
     }
+    const bool want_takeover = (argc > 2 && strcmp(argv[2], "takeover") == 0);
 
     tc_device_init(&g_pad);
     tc_device_init(&g_gpio);
@@ -161,6 +212,15 @@ int main(int argc, char **argv) {
         if (!shaken) return 5;
     }
 
+    /* A mistyped argument — "Takeover", "takover" — used to produce a run with no
+       takeover and no message, indistinguishable from a deliberate plain run from
+       either side of the socket. Say it once. It cannot be said any earlier: say()
+       needs the socket, which is only connected above. */
+    if (argc > 2 && !want_takeover) {
+        say("L ignoring unrecognised argument \"%s\" — the only one understood is "
+            "\"takeover\"; running without one", argv[2]);
+    }
+
     int opened = 0;
     if (tc_open_pad(&g_pad) == 0) {
         opened++;
@@ -176,18 +236,139 @@ int main(int argc, char **argv) {
     }
     if (opened == 0) leave("no input devices");
 
-    if (g_pad.fd >= 0) {
-        if (tc_uinput_create(&g_pad, "Thorcuts Gamepad", &g_vpad) == 0) {
-            say("L virtual pad created");
+    /* The takeover, if the app asked for one. It must happen BEFORE anything is
+       grabbed: the panic combo is Home + Select and both live on the GAMEPAD, so
+       stalling here while holding a grab would leave the user with no controller
+       and no way out. On failure we carry on WITHOUT a takeover rather than
+       refusing to start — a working controller with one emulator limitation beats
+       no Thorcuts at all. */
+    if (want_takeover && g_pad.fd >= 0) {
+        tc_takeover_result r = tc_takeover(&g_pad, &g_vpad);
+
+        /* One arm per result, because the question teardown has to answer is not
+           "did the takeover work" but "did the deregister write land" — i.e. is
+           the numbering ours to repair. A switch over the whole enum rather than
+           an if-chain, so that -Wswitch fails the build if a result is ever added
+           and nobody decides which side of that line it falls on.
+
+           NOT gated on g_pad.fd < 0, tempting though that is: tc_takeover also
+           closes the pad on SOURCE_NEVER_WENT and CREATE_FAILED, which are back at
+           1 already, so that gate would buy nothing but a pointless 3 s restore
+           cycle on every teardown after those two. */
+        switch (r) {
+            /* By design: the clone holds 1 and AYN's pad is at 2. The whole point
+               of the exercise, and the pad must be put back on the way out. */
+            case TC_TAKEOVER_OK:
+                g_numbering_disturbed = true;
+                say("L takeover ok: the twin holds controller 1, AYN's pad is at 2");
+                /* The replacement is a DIFFERENT node from the pad we opened at
+                   startup, and it now shares its name and ids with our twin, so
+                   name it while we know it. */
+                say("L AYN's replacement pad is \"%s\" at %s", g_pad.name, g_pad.path);
+                break;
+
+            /* The pad is deregistered and the write that brings it back failed,
+               tc_takeover's own retry included — and on some paths its last-resort
+               full cycle as well (takeover.h). The user may have no controller at
+               all. Claim the restore anyway: teardown's cycle is a free further
+               attempt and the only lever left, and running the whole session and
+               exiting without trying once more would throw it away. Reported on
+               its own rather than as a degrade: tc_takeover's other failures all
+               leave the user a controller, and a single "takeover failed" line
+               would bury the one that does not. */
+            case TC_TAKEOVER_RESTORE_FAILED:
+                g_numbering_disturbed = true;
+                say("L %s", tc_takeover_describe(r));
+                break;
+
+            /* Both are reached AFTER tc_takeover's step 5 re-registered the pad
+               AT 2, and both then call tc_pad_restore() testing only > 0 — which
+               swallows the -1 that takeover.h documents as "nothing was changed …
+               for a teardown call means still at 2". So the pad may be sitting at
+               2 right now. Worse, the fallback twin created below then takes 1,
+               making the end state indistinguishable from a successful takeover
+               with nothing left to undo it. Claim the restore: when
+               tc_pad_restore did work, the cost is one 3 s cycle on the way out;
+               the cost of not claiming it is a pad silently left at 2. */
+            case TC_TAKEOVER_SELF_UNRESOLVED:
+            case TC_TAKEOVER_REPLACEMENT_NEVER_CAME:
+                g_numbering_disturbed = true;
+                say("L takeover failed (%s) — continuing without it; AYN's pad may "
+                    "have been left at 2, so the numbering is put back on teardown",
+                    tc_takeover_describe(r));
+                break;
+
+            /* Nothing was written to the device at all (takeover.h: "nothing was
+               changed on the device"), so there is nothing to put back and g_pad
+               is still open on the original node. */
+            case TC_TAKEOVER_ARM_FAILED:
+            case TC_TAKEOVER_DEREGISTER_FAILED:
+            /* Here the deregister DID land — but the clone never went live and the
+               single re-register that follows SUCCEEDED, because anything else
+               returns TC_TAKEOVER_RESTORE_FAILED. So AYN's pad is back at 1 and
+               the numbering is undisturbed; only g_pad's fd is stale, and it is
+               reopened below. */
+            case TC_TAKEOVER_SOURCE_NEVER_WENT:
+            case TC_TAKEOVER_CREATE_FAILED:
+                say("L takeover failed (%s) — continuing without it; the twin will "
+                    "be controller 2 and emulators keyed on 1 will not see it",
+                    tc_takeover_describe(r));
+                break;
+        }
+    }
+
+    /* A FAILED takeover CLOSES g_pad (see takeover.h) and does not reopen it, so
+       the fallback twin has nothing to clone from until the pad is reopened. The
+       stale g_pad.path must not be reused: reopen by capability instead.
+
+       Gated on want_takeover, which is what this comment always claimed and the
+       code did not do: ungated, the block also ran on a plain run whose first
+       tc_open_pad had simply failed, and then logged "reopened AYN's pad" on a
+       path where nothing had taken anything over. */
+    if (want_takeover && g_pad.fd < 0) {
+        if (tc_open_pad(&g_pad) == 0) {
+            say("L reopened AYN's pad as \"%s\" at %s", g_pad.name, g_pad.path);
+        } else {
+            say("L AYN's pad is not there to reopen; continuing without a pad twin");
+        }
+    }
+
+    /* The pad's twin carries its SOURCE'S NAME verbatim, because an emulator's
+       saved mapping contains it — Dolphin stores "Android/1/Odin Controller".
+       When the takeover ran, the twin already exists and is that clone. */
+    if (g_pad.fd >= 0 && g_vpad.fd < 0) {
+        if (tc_uinput_create(&g_pad, g_pad.name, &g_vpad) == 0) {
+            say("L virtual pad created as \"%s\"", g_pad.name);
         } else {
             leave("cannot create virtual pad");
         }
     }
+    /* gpio-keys keeps a legible name: nothing keys on it, it is not a gamepad and
+       receives no controller number, so legibility in a bug report is worth more
+       than consistency here. */
     if (g_gpio.fd >= 0) {
         if (tc_uinput_create(&g_gpio, "Thorcuts Keys", &g_vgpio) == 0) {
             say("L virtual keys created");
         } else {
             leave("cannot create virtual keys");
+        }
+    }
+
+    /* Which node is ours. The pad twin carries its source's NAME as well as its
+       bus, vendor and product — deliberately, because the emulator mapping keys on
+       all of them — so from here on two devices are identical in every field
+       `dumpsys input` prints except the node path and the controller number. A bug
+       report that cannot tell them apart cannot be read, so say it once now that
+       the twin exists. */
+    if (g_vpad.fd >= 0) {
+        char node[64];
+        if (tc_clone_node_path(&g_vpad, node, sizeof node) == 0) {
+            say("L pad twin \"%s\" at %s", g_vpad.name, node);
+        } else {
+            /* Not fatal: the twin works and only the log is poorer. takeover.c
+               treats the same failure as fatal because it needs the path to avoid
+               grabbing its own clone; here nothing depends on it. */
+            say("L pad twin \"%s\" — node path unresolved", g_vpad.name);
         }
     }
 
@@ -197,7 +378,14 @@ int main(int argc, char **argv) {
     if (g_gpio.fd >= 0 && tc_grab(&g_gpio) != 0) leave("cannot grab gpio-keys");
     say("L grabbed; Android now sees only the twins");
 
-    say("R %d", opened);
+    /* Count what is actually OPEN at the moment of reporting rather than carrying
+       the startup tally forward. `opened` goes stale in both directions once a
+       takeover is in play: tc_takeover closes the pad on every failure but its
+       first two, and the reopen above may or may not get it back. The diagnostics
+       screen shows this number to the user as readiness ("ready, N devices"), so
+       it has to be the truth. Nothing can be grabbed-but-closed here: a failed
+       grab leaves through leave(). */
+    say("R %d", (g_pad.fd >= 0 ? 1 : 0) + (g_gpio.fd >= 0 ? 1 : 0));
 
     tc_state state;
     tc_init(&state);
