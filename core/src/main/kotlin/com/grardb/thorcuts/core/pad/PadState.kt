@@ -59,8 +59,23 @@ object PadState {
         val pads = thorPads(all).sortedBy { it.controllerNumber }
         val numbers = pads.map { it.controllerNumber }
         return when {
+            // RESTORE, not REPORT_ONLY. This is precisely the state a crash or a
+            // SIGKILL midway through the helper's takeover leaves behind: the
+            // trigger key is still 1, so AYN has deregistered its pad and Android
+            // reports no gamepad at all. It is the worst state this project can
+            // create, and teardown layer 3 only covers the SIGKILL case if the
+            // decision here says RESTORE -- reporting it would leave the owner
+            // with a dead controller and nothing but AYN's Quick Settings tile or
+            // a reboot to get out of it.
+            //
+            // It cannot race our own takeover: the self-heal runs in
+            // HelperSupervisor.start() BEFORE the helper is launched, so the
+            // window in which the pad is legitimately absent has not opened yet.
+            // And if the pad is absent for some other reason, cycling the key is
+            // harmless -- the cycle ends with the key at 0, which is the state in
+            // which the pad exists.
             pads.isEmpty() ->
-                PadAssessment(PadAction.REPORT_ONLY, "no Thor pad is registered")
+                PadAssessment(PadAction.RESTORE, "no Thor pad is registered at all")
 
             pads.size == 1 && numbers[0] == 1 ->
                 PadAssessment(PadAction.TAKE_OVER, "AYN's pad holds 1 and no twin exists")

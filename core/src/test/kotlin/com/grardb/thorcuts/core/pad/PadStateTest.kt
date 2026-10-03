@@ -41,8 +41,25 @@ class PadStateTest {
     }
 
     @Test
-    fun `no Thor pad at all is reported, never acted on`() {
-        assertEquals(PadAction.REPORT_ONLY, PadState.assess(emptyList()).action)
+    fun `no Thor pad at all is the crash state and must be restored`() {
+        // This is exactly what a crash or a SIGKILL midway through the takeover
+        // leaves behind: the trigger key still says 1, so Android reports no
+        // gamepad at all. Teardown layer 3 claims to cover that case, and it only
+        // does if this says RESTORE -- REPORT_ONLY would leave the owner with a
+        // dead controller and only AYN's tile or a reboot to recover.
+        assertEquals(PadAction.RESTORE, PadState.assess(emptyList()).action)
+    }
+
+    @Test
+    fun `other devices present but no Thor pad is still the crash state`() {
+        // Deliberately not emptyList(): a keyboard and an external controller are
+        // present and correctly filtered out, so it is the absence of a THOR pad
+        // that drives the decision. The filter, not an empty input, must produce
+        // RESTORE -- otherwise a user with an external pad plugged in would be
+        // left unhealed in precisely the state this exists to heal.
+        val keyboard = PadDevice(controllerNumber = 0, vendorId = 0x1234, productId = 0x5678, name = "kbd")
+        val external = PadDevice(controllerNumber = 1, vendorId = 0x045e, productId = 0x02ea, name = "Xbox One")
+        assertEquals(PadAction.RESTORE, PadState.assess(listOf(keyboard, external)).action)
     }
 
     @Test
