@@ -57,7 +57,13 @@ object ControllerNumbers {
         val out = gateway.execScript(
             listOf(
                 "settings put system $TRIGGER_KEY 1",
-                "sleep 1",
+                // 3 s, matching native/src/takeover.c's TC_RESTORE_GAP_MS and the
+                // only measurement anyone has taken of this cycle
+                // (scratch/m2-recon/run-single-key.sh STEP 5). It was 1 s here and
+                // 300 ms there; both were guesses. If the 0 write arrives before
+                // AYN's daemon has destroyed the pad, it can coalesce the pair and
+                // never rebuild, so the restore silently does nothing.
+                "sleep 3",
                 "settings put system $TRIGGER_KEY 0",
             )
         )
