@@ -120,7 +120,12 @@ static bool gone(const char *path) {
  *
  * Writes "/dev/input/eventN" into [out]. Returns 0 on success.
  */
-static int clone_node_path(const tc_uinput *u, char *out, size_t out_sz) {
+int tc_clone_node_path(const tc_uinput *u, char *out, size_t out_sz) {
+    /* An armed-but-unfired device has an fd and no node, so asking the kernel for
+       its sysname is meaningless. Guard both states rather than relying on every
+       caller to. */
+    if (u->fd < 0 || !u->live) return -1;
+
     char sysname[64] = {0};
     if (ioctl(u->fd, UI_GET_SYSNAME(sizeof sysname - 1), sysname) < 0) return -1;
 
@@ -224,7 +229,7 @@ tc_takeover_result tc_takeover(tc_device *src, tc_uinput *clone) {
     /* 6. Learn our own node, so the scan in step 7 cannot match it.
           If it cannot be resolved we FAIL THE TAKEOVER. An earlier revision
           passed NULL to the scan and "checked afterwards" that what it opened was
-          not the clone — which could never work: clone_node_path writes
+          not the clone — which could never work: tc_clone_node_path writes
           [clone_path] only on its success path, so the check's own condition
           (exclude == NULL && clone_path[0] != '\0') was a contradiction and never
           fired. The scan would then have run with no exclusion and could have
@@ -235,7 +240,7 @@ tc_takeover_result tc_takeover(tc_device *src, tc_uinput *clone) {
        the exclusion below would be VACUOUS, which is the failure C1 was about.
        Unlike comparing paths after the scan (see step 7) this one can actually
        fire — devtmpfs lag, or a sysfs name that no longer maps to a node. */
-    if (clone_node_path(clone, clone_path, sizeof clone_path) != 0 || gone(clone_path)) {
+    if (tc_clone_node_path(clone, clone_path, sizeof clone_path) != 0 || gone(clone_path)) {
         tc_uinput_destroy(clone);
         /* The pad came back at 2 in step 5, so the full cycle is needed to put it
            back at 1 — a single write would do nothing. */

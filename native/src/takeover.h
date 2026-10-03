@@ -133,4 +133,17 @@ int tc_pad_restore(void);
 
 const char *tc_takeover_describe(tc_takeover_result r);
 
+/*
+ * Where a uinput device of ours sits in /dev/input.
+ *
+ * UI_GET_SYSNAME answers with a sysfs name like "input78", not an event node, so
+ * the event* child has to be read out of /sys/class/input/. Writes
+ * "/dev/input/eventN" into [out]; returns 0 on success.
+ *
+ * Exported rather than kept private because main.c needs it too: once the twin
+ * carries its source's NAME as well as its ids, the node path is the only thing
+ * that tells the twin and AYN's pad apart in a bug report.
+ */
+int tc_clone_node_path(const tc_uinput *u, char *out, size_t out_sz);
+
 #endif /* THORCUTS_TAKEOVER_H */
