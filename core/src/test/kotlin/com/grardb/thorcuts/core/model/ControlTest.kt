@@ -23,6 +23,14 @@ class ControlTest {
     }
 
     @Test
+    fun `an axis control needs a non-zero threshold`() {
+        // A threshold of 0 would be "always pressed"; the parser rejects it as `value` too.
+        assertFailsWith<IllegalArgumentException> { Control(Device.PAD, EvdevType.ABS, 16, 0) }
+        Control(Device.PAD, EvdevType.ABS, 16, 1)
+        Control(Device.PAD, EvdevType.ABS, 9, 16384)
+    }
+
+    @Test
     fun `only EV_KEY and EV_ABS are controls`() {
         assertFailsWith<IllegalArgumentException> { Control(Device.PAD, 2, 0, 1) }   // EV_REL
         assertFailsWith<IllegalArgumentException> { Control(Device.PAD, 0, 0, 1) }   // EV_SYN

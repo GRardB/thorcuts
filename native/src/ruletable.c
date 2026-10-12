@@ -66,6 +66,7 @@ static tc_table_result parse_rule(const uint8_t *r, tc_rule *out) {
         if (b[i].dev != TC_RT_DEV_PAD && b[i].dev != TC_RT_DEV_GPIO) return TC_TABLE_DEVICE;
         if (b[i].type != TC_RT_EV_KEY && b[i].type != TC_RT_EV_ABS) return TC_TABLE_TYPE;
         if (b[i].type == TC_RT_EV_KEY && b[i].value != 1) return TC_TABLE_VALUE;
+        if (b[i].type == TC_RT_EV_ABS && b[i].value == 0) return TC_TABLE_VALUE;
         if (i > 0 && control_cmp(b[i - 1], b[i]) >= 0) return TC_TABLE_ORDER;
         for (int m = 0; m < TC_MOD_COUNT; m++) {
             if (control_cmp(b[i], tc_modifier_controls[m]) == 0) return TC_TABLE_CLASH;

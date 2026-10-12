@@ -87,16 +87,31 @@ class ShortcutTest {
     }
 
     @Test
-    fun `the bootstrap is M1's rule and nothing else`() {
-        assertEquals(1, Bootstrap.SHORTCUTS.size)
-        val s = Bootstrap.SHORTCUTS[0]
+    fun `the bootstrap is M1's rule plus the two acceptance rules`() {
+        assertEquals(
+            listOf("m1-swap-screens", "dpad-left-closes", "tap-ayn-opens"),
+            Bootstrap.SHORTCUTS.map { it.id },
+        )
+        val swap = Bootstrap.SHORTCUTS[0]
         assertEquals(
             Trigger(setOf(ModifierKey.AYN), setOf(Bootstrap.X), TriggerStyle.HOLD, holdMs = 400),
-            s.trigger,
+            swap.trigger,
         )
         assertEquals(Control(Device.PAD, EvdevType.KEY, 307, 1), Bootstrap.X)   // BTN_NORTH
-        assertEquals(Action.SwapScreens, s.action)
-        assertEquals(Scope.Global(), s.scope)
-        assertTrue(s.enabled)
+        assertEquals(Action.SwapScreens, swap.action)
+
+        val left = Bootstrap.SHORTCUTS[1]
+        assertEquals(Control(Device.PAD, EvdevType.ABS, 16, -1), Bootstrap.DPAD_LEFT)   // HAT0X
+        assertEquals(Trigger(setOf(ModifierKey.AYN), setOf(Bootstrap.DPAD_LEFT)), left.trigger)
+        assertEquals(Action.CloseScreen(ScreenTarget.FOCUSED), left.action)
+
+        val tap = Bootstrap.SHORTCUTS[2]
+        assertEquals(Trigger(setOf(ModifierKey.AYN)), tap.trigger)
+        assertEquals(Action.OpenThorcuts(ScreenTarget.TOP), tap.action)
+
+        for (s in Bootstrap.SHORTCUTS) {
+            assertEquals(Scope.Global(), s.scope)
+            assertTrue(s.enabled)
+        }
     }
 }

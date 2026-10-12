@@ -273,6 +273,18 @@ static void test_rejects_value(void) {
     CHECK(bad == 2);
 }
 
+static void test_rejects_zero_threshold(void) {
+    /* kitchen-sink rule 0 button 0 is PAD ABS 16 at -1 (ffff). A threshold of 0 would be
+       "always pressed"; the model refuses it and so must the parser. 0 < +1 keeps the
+       buttons in order, so this is a `value` fault, not an `order` one. */
+    blob b = kitchen();
+    b.buf[R0 + 8 + 4] = 0;
+    b.buf[R0 + 8 + 5] = 0;
+    int bad = 99;
+    CHECK(expect_bad(&b, GEN_KS, &bad) == TC_TABLE_VALUE);
+    CHECK(bad == 0);
+}
+
 static void test_rejects_slot(void) {
     blob b = kitchen();        /* rule 1 has no buttons; dirty its first slot */
     b.buf[R1 + 8 + 2] = 1;
@@ -472,6 +484,7 @@ int main(void) {
     RUN(test_rejects_device);
     RUN(test_rejects_type);
     RUN(test_rejects_value);
+    RUN(test_rejects_zero_threshold);
     RUN(test_rejects_slot);
     RUN(test_rejects_order);
     RUN(test_rejects_clash);

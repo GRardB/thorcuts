@@ -90,7 +90,8 @@ typedef enum {
     TC_TABLE_RESERVED,      /* a reserved byte is not 0 */
     TC_TABLE_DEVICE,        /* slot not PAD or GPIO */
     TC_TABLE_TYPE,          /* not KEY or ABS */
-    TC_TABLE_VALUE,         /* a KEY control whose value is not 1 */
+    TC_TABLE_VALUE,         /* a KEY control whose value is not 1, or an ABS control
+                               whose threshold is 0 */
     TC_TABLE_SLOT,          /* an unused button slot is not all zero */
     TC_TABLE_ORDER,         /* buttons not strictly ascending (covers duplicates) */
     TC_TABLE_CLASH          /* a button that is one of the five modifier controls */

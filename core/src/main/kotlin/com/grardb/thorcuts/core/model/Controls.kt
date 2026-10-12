@@ -33,6 +33,9 @@ data class Control(val device: Device, val type: Int, val code: Int, val value: 
         if (type == EvdevType.KEY) {
             require(value == 1) { "a key is bound on its press (1), was $value" }
         }
+        if (type == EvdevType.ABS) {
+            require(value != 0) { "an axis is bound at a non-zero threshold; 0 is always pressed" }
+        }
     }
 }
 

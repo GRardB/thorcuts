@@ -68,11 +68,11 @@ class RuleCompilerTest {
     }
 
     @Test
-    fun `the bootstrap compiles to the m1-swap fixture at generation 1`() {
+    fun `the bootstrap compiles to the bootstrap fixture at generation 1`() {
         val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, foreground = null, generation = 1)
-        assertContentEquals(fixture("m1-swap.bin"), table.bytes)
+        assertContentEquals(fixture("bootstrap.bin"), table.bytes)
         assertEquals(1, table.generation)
-        assertEquals(1, table.ruleCount)
+        assertEquals(3, table.ruleCount)
         assertEquals(Bootstrap.SHORTCUTS, table.shortcuts)
         assertEquals(RuleTableFormat.hex(table.bytes), table.hex)
     }
