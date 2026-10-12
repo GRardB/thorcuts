@@ -1,5 +1,6 @@
 package com.grardb.thorcuts.core.helper
 
+import com.grardb.thorcuts.core.rules.RuleTableFormat
 import com.grardb.thorcuts.core.safety.CommandSafety
 
 /** Something the helper said. */
@@ -18,15 +19,45 @@ sealed interface HelperMessage {
 
     /** The helper is shutting down, having released every device. */
     data class Exiting(val reason: String) : HelperMessage
+
+    /** The helper holds the table we pushed as [generation]; it has [ruleCount] rules. */
+    data class TableAccepted(val generation: Int, val ruleCount: Int) : HelperMessage
+
+    /** The helper refused the table pushed as [generation]; nothing changed. [reason] is the
+     *  helper's token, e.g. `hold rule 2`, `magic`, `hex`, `line`. */
+    data class TableRejected(val generation: Int, val reason: String) : HelperMessage
 }
 
-/** Something the app tells the helper. */
-enum class HelperCommand(val wire: String) {
-    Handshake("H"),
-    Ping("P"),
-    ModeMatch("M match"),
-    ModeCapture("M capture"),
-    Stop("S"),
+/** Something the app tells the helper. A sealed interface, not an enum, because [PushTable]
+ *  carries data. The five fixed commands keep their exact wire strings. */
+sealed interface HelperCommand {
+    val wire: String
+
+    data object Handshake : HelperCommand { override val wire = "H" }
+    data object Ping : HelperCommand { override val wire = "P" }
+    data object ModeMatch : HelperCommand { override val wire = "M match" }
+    data object ModeCapture : HelperCommand { override val wire = "M capture" }
+    data object Stop : HelperCommand { override val wire = "S" }
+
+    /**
+     * `T <generation> <hex>`: a compiled rule table. [hex] is the table's bytes, lowercase,
+     * at most 2 × [RuleTableFormat.MAX_BYTES] characters — the same limits the helper
+     * enforces, checked here so a refusal is an exception at the call site rather than a
+     * `T bad` line later. An EMPTY payload is allowed through: it is the helper's to refuse
+     * (`short`), and refusing it here would hide that path from the protocol tests.
+     */
+    data class PushTable(val generation: Int, val hex: String) : HelperCommand {
+        init {
+            require(generation >= 0) { "generation must be non-negative, was $generation" }
+            require(hex.length % 2 == 0) { "hex must have an even length, had ${hex.length}" }
+            require(hex.length <= 2 * RuleTableFormat.MAX_BYTES) {
+                "table of ${hex.length / 2} bytes exceeds ${RuleTableFormat.MAX_BYTES}"
+            }
+            require(hex.all { it in '0'..'9' || it in 'a'..'f' }) { "hex must be lowercase 0-9a-f" }
+        }
+
+        override val wire: String get() = "T $generation $hex"
+    }
 }
 
 /**
@@ -57,6 +88,20 @@ object HelperProtocol {
             }
             "L" -> if (rest.isEmpty()) null else HelperMessage.Log(rest)
             "X" -> if (rest.isEmpty()) null else HelperMessage.Exiting(rest)
+            "T" -> {
+                // "ok <gen> <count>" or "bad <gen> <reason...>". The helper never originates
+                // a generation; it echoes ours, so anything outside 0..Int.MAX_VALUE is noise.
+                val p = rest.split(' ', limit = 3)
+                if (p.size != 3) return null
+                val gen = p[1].toIntOrNull() ?: return null
+                if (gen < 0) return null
+                when (p[0]) {
+                    "ok" -> p[2].toIntOrNull()?.takeIf { it >= 0 }
+                        ?.let { HelperMessage.TableAccepted(gen, it) }
+                    "bad" -> if (p[2].isBlank()) null else HelperMessage.TableRejected(gen, p[2])
+                    else -> null
+                }
+            }
             else -> null
         }
     }

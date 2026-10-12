@@ -106,6 +106,7 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
 
             Text("Input helper", style = MaterialTheme.typography.labelMedium)
             Text(state.helperState, style = MaterialTheme.typography.bodyMedium)
+            Text(state.tableState, style = MaterialTheme.typography.bodyMedium)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

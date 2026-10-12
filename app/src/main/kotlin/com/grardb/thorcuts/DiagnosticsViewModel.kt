@@ -25,6 +25,9 @@ data class DiagnosticsState(
     val lastSwap: String = "",
     val busy: Boolean = false,
     val helperState: String = "not started",
+    /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
+     *  overwrite it. */
+    val tableState: String = "no table",
     val eventLog: List<String> = emptyList(),
 )
 
@@ -137,6 +140,27 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             is HelperMessage.Event -> _state.update {
                 val row = "dev=${message.device} type=${message.type} code=${message.code} value=${message.value}"
                 it.copy(eventLog = (listOf(row) + it.eventLog).take(40))
+            }
+            is HelperMessage.TableAccepted -> {
+                Log.i(TAG, "TABLE_ACK gen=${message.generation} rules=${message.ruleCount}")
+                val gen = message.generation
+                val line = "TABLE gen $gen ok, ${message.ruleCount} rule(s)"
+                _state.update {
+                    it.copy(
+                        tableState = "table gen $gen: ${message.ruleCount} rule(s)",
+                        eventLog = (listOf(line) + it.eventLog).take(40),
+                    )
+                }
+            }
+            is HelperMessage.TableRejected -> {
+                Log.w(TAG, "TABLE_REJECTED gen=${message.generation} reason=${message.reason}")
+                val line = "TABLE gen ${message.generation} REJECTED: ${message.reason}"
+                _state.update {
+                    it.copy(
+                        tableState = "table gen ${message.generation} REJECTED: ${message.reason}",
+                        eventLog = (listOf(line) + it.eventLog).take(40),
+                    )
+                }
             }
         }
     }
