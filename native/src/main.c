@@ -326,7 +326,19 @@ int main(int argc, char **argv) {
        tc_open_pad had simply failed, and then logged "reopened AYN's pad" on a
        path where nothing had taken anything over. */
     if (want_takeover && g_pad.fd < 0) {
-        if (tc_open_pad(&g_pad) == 0) {
+        /* RETRY, do not try once. A failed takeover runs tc_pad_restore() on its
+           way out, which DEREGISTERS the pad and re-registers it — so at the
+           moment we arrive here the pad is reliably ABSENT for several seconds,
+           and a single attempt always failed. Measured on hardware 2026-10-12:
+           the helper came up "ready, 1 devices" with no pad twin and nothing
+           grabbed, every time. The bound outlasts a restore (its own gap plus
+           AYN's re-enumeration) with margin. */
+        const int64_t reopen_deadline = now_ms() + 10000;
+        while (tc_open_pad(&g_pad) != 0 && now_ms() < reopen_deadline) {
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 200 * 1000000L};
+            nanosleep(&ts, NULL);
+        }
+        if (g_pad.fd >= 0) {
             say("L reopened AYN's pad as \"%s\" at %s", g_pad.name, g_pad.path);
         } else {
             say("L AYN's pad is not there to reopen; continuing without a pad twin");

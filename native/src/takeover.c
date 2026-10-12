@@ -32,7 +32,13 @@
  * conservatively rather than measured as minima. 3 s is therefore comfortable
  * for the disappearance and at the edge for the reappearance.
  */
-#define TC_WAIT_MS 3000
+/* MEASURED 2026-10-12, on hardware: 3000 was TOO SHORT. The takeover reached
+   step 7, waited 3 s for AYN's replacement pad, timed out, and degraded — so the
+   feature silently did not happen. The recon's own reappear wait was 5 s and the
+   comment above already called 3 s "at the edge"; this is that figure plus
+   margin. The deregister side is unchanged: 3 s was never at issue there, and a
+   longer wait only costs time on a device that is already misbehaving. */
+#define TC_WAIT_MS 6000
 #define TC_POLL_MS 10
 
 /*
