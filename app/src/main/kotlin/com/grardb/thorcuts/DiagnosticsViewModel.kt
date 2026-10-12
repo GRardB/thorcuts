@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.grardb.thorcuts.core.helper.HelperMessage
+import com.grardb.thorcuts.core.model.Bootstrap
+import com.grardb.thorcuts.core.rules.RuleCompiler
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.privilege.Privilege
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
@@ -36,6 +38,14 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     private val gateway = PserviceGateway(app)
     private val tasks = TaskActions(gateway)
     private val helper = HelperSupervisor(app, gateway, ::onHelperMessage)
+
+    /**
+     * One generation per push, per process, starting at 1. Only the Ready branch below
+     * touches it, and Ready arrives on the helper's reader thread, so it needs no lock.
+     * The helper's table dies with its socket, so a restarted helper at a higher
+     * generation is the only cross-connection case, and the right one.
+     */
+    private var tableGeneration = 0
 
     private val _state = MutableStateFlow(DiagnosticsState(gatewayName = gateway.name))
     val state: StateFlow<DiagnosticsState> = _state.asStateFlow()
@@ -98,8 +108,15 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onHelperMessage(message: HelperMessage) {
         when (message) {
-            is HelperMessage.Ready ->
+            is HelperMessage.Ready -> {
                 _state.update { it.copy(helperState = "ready, ${message.deviceCount} devices") }
+                // Push the rule table NOW, on Ready, and never earlier — see pushTable().
+                // Bootstrap.SHORTCUTS is M1's one rule until the config layer exists.
+                // foreground = null until M4's monitor exists: Global rules apply, Apps
+                // rules do not (RuleCompiler.select).
+                val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, null, ++tableGeneration)
+                helper.pushTable(table)
+            }
             is HelperMessage.Log ->
                 _state.update { it.copy(helperState = message.text) }
             is HelperMessage.Exiting ->

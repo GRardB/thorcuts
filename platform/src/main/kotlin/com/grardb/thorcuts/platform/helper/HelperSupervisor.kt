@@ -10,6 +10,7 @@ import com.grardb.thorcuts.core.helper.HelperCommand
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.helper.HelperProtocol
 import com.grardb.thorcuts.core.pad.PadAction
+import com.grardb.thorcuts.core.rules.CompiledTable
 import com.grardb.thorcuts.platform.pad.ControllerNumbers
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
 import java.io.OutputStream
@@ -202,6 +203,26 @@ class HelperSupervisor(
 
     fun setCaptureMode(capture: Boolean) {
         send(if (capture) HelperCommand.ModeCapture else HelperCommand.ModeMatch)
+    }
+
+    /**
+     * Send a compiled rule table.
+     *
+     * Call it on [HelperMessage.Ready] and never earlier. The helper's handshake wait
+     * reads every line until it sees `H` and DISCARDS the rest, then spends seconds
+     * opening devices and running the takeover before it enters the loop that
+     * understands `T`. A table pushed on "helper connected" is silently eaten; Ready
+     * is written immediately before that loop starts, so a push on Ready is the first
+     * thing it reads. Thread-safe like [send], so the reader thread that delivers
+     * Ready can call it directly.
+     *
+     * The supervisor owns the channel, not the policy: WHAT to push and WHEN to
+     * recompile is the caller's.
+     */
+    fun pushTable(table: CompiledTable) {
+        Log.i(TAG, "TABLE_PUSH gen=${table.generation} rules=${table.ruleCount} " +
+            "bytes=${table.bytes.size}")
+        send(HelperCommand.PushTable(table.generation, table.hex))
     }
 
     private fun launch() {
