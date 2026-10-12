@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Bootstrap
+import com.grardb.thorcuts.core.rules.CompiledTable
 import com.grardb.thorcuts.core.rules.RuleCompiler
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.privilege.Privilege
@@ -19,6 +20,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val NO_TABLE = "no table"
+private const val NO_TABLE_NO_HELPER = "no table (helper not running)"
+
 data class DiagnosticsState(
     val gatewayName: String = "",
     val privilege: String = "not probed",
@@ -29,7 +33,7 @@ data class DiagnosticsState(
     val helperState: String = "not started",
     /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
      *  overwrite it. */
-    val tableState: String = "no table",
+    val tableState: String = NO_TABLE,
     val eventLog: List<String> = emptyList(),
 )
 
@@ -41,11 +45,29 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * One generation per push, per process, starting at 1. Only the Ready branch below
-     * touches it, and Ready arrives on the helper's reader thread, so it needs no lock.
-     * The helper's table dies with its socket, so a restarted helper at a higher
-     * generation is the only cross-connection case, and the right one.
+     * touches it. Ready is delivered inline from serve() on the accept thread — a NEW
+     * accept thread per start/stop cycle, never two at once — and the handoff between a
+     * dying accept thread and the next start() goes through @Volatile `connected`/`running`
+     * plus Thread.start(), which is the happens-before this plain var relies on. The
+     * helper's table dies with its socket, so a restarted helper at a higher generation
+     * is the only cross-connection case, and the right one.
      */
     private var tableGeneration = 0
+
+    /**
+     * The table most recently compiled and handed to pushTable() -- which can drop it
+     * silently if the socket is gone, so "pushed" means offered, not acknowledged. Kept
+     * so a rule index the helper reports can be
+     * resolved back to its Shortcut. Rule i of [CompiledTable.bytes] is
+     * [CompiledTable.shortcuts]`[i]`, and [CompiledTable.generation] says which push.
+     *
+     * RETENTION DEPTH IS NOT DECIDED HERE. Only the latest table is kept for now, which
+     * is enough for the acknowledgement check below. The matcher rewrite — the piece that
+     * makes `F <gen> <index>` real — must state how many generations the app keeps; a hold
+     * session can straddle a push, so "current plus previous" is the expected answer.
+     * Written on the accept thread in the Ready branch; read there in TableAccepted.
+     */
+    @Volatile private var pushedTable: CompiledTable? = null
 
     private val _state = MutableStateFlow(DiagnosticsState(gatewayName = gateway.name))
     val state: StateFlow<DiagnosticsState> = _state.asStateFlow()
@@ -102,7 +124,13 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(lastSwap = outcome) }
     }
 
-    fun startHelper() = privileged { helper.start() }
+    fun startHelper() = privileged {
+        // A fresh connection gets a fresh slot -- but ONLY when there is no live helper.
+        // start() is a silent no-op while one runs, and blanking the line then would
+        // claim "no table" about a helper that still holds generation N.
+        if (!helper.connected) _state.update { it.copy(tableState = NO_TABLE) }
+        helper.start()
+    }
 
     fun stopHelper() = privileged { helper.stop() }
 
@@ -114,13 +142,44 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 // Bootstrap.SHORTCUTS is M1's one rule until the config layer exists.
                 // foreground = null until M4's monitor exists: Global rules apply, Apps
                 // rules do not (RuleCompiler.select).
-                val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, null, ++tableGeneration)
-                helper.pushTable(table)
+                //
+                // Caught here, not left to serve(): a `require` out of compile() (too many
+                // applicable rules) or PushTable (a malformed payload) is a FAILED PUSH, and
+                // serve()'s catch would instead close the socket and report a dead helper.
+                // Unreachable with one bootstrap rule; reachable the day a config loads.
+                // Deliberately NOT Throwable: an encoder-invariant `check` failing is a bug
+                // in this app, and killing the connection is the right outcome for that.
+                try {
+                    val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, null, ++tableGeneration)
+                    pushedTable = table
+                    helper.pushTable(table)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "TABLE_PUSH_FAILED gen=$tableGeneration: ${e.message}")
+                    val line = "TABLE gen $tableGeneration NOT PUSHED: ${e.message}"
+                    _state.update {
+                        it.copy(
+                            tableState = "table gen $tableGeneration NOT PUSHED: ${e.message}",
+                            eventLog = (listOf(line) + it.eventLog).take(40),
+                        )
+                    }
+                }
             }
-            is HelperMessage.Log ->
-                _state.update { it.copy(helperState = message.text) }
+            is HelperMessage.Log -> _state.update {
+                // The disconnect line is the one Log that means "no helper": clear the
+                // table slot with it, or the screen keeps claiming a table nothing holds.
+                if (message.text == HelperSupervisor.DISCONNECTED) {
+                    it.copy(helperState = message.text, tableState = NO_TABLE_NO_HELPER)
+                } else {
+                    it.copy(helperState = message.text)
+                }
+            }
             is HelperMessage.Exiting ->
-                _state.update { it.copy(helperState = "exited: ${message.reason}") }
+                _state.update {
+                    it.copy(
+                        helperState = "exited: ${message.reason}",
+                        tableState = NO_TABLE_NO_HELPER,
+                    )
+                }
             is HelperMessage.Fired -> {
                 _state.update {
                     it.copy(eventLog = (listOf("FIRED rule ${message.ruleId}") + it.eventLog).take(40))
@@ -159,6 +218,14 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(eventLog = (listOf(row) + it.eventLog).take(40))
             }
             is HelperMessage.TableAccepted -> {
+                val pushed = pushedTable
+                if (pushed == null || pushed.generation != message.generation) {
+                    Log.w(
+                        TAG,
+                        "TABLE_ACK gen=${message.generation} does not match the pushed " +
+                            "gen=${pushed?.generation}",
+                    )
+                }
                 Log.i(TAG, "TABLE_ACK gen=${message.generation} rules=${message.ruleCount}")
                 val gen = message.generation
                 val line = "TABLE gen $gen ok, ${message.ruleCount} rule(s)"

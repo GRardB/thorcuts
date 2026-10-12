@@ -30,6 +30,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +51,13 @@ static volatile sig_atomic_t g_signalled = 0;
 /* The rule table the app last pushed. HELD, NOT CONSULTED: matcher.c still runs M1's
    hardcoded AYN + X rule, and nothing reads this yet. The matcher rewrite — the next
    piece — replaces that rule with this table. Zero-initialised: an empty table at
-   generation 0, which is also what an app that never pushes gets. */
+   generation 0, which is also what an app that never pushes gets.
+
+   SWAP POINT: g_table is replaced wholesale, inside the socket branch of the main loop,
+   before that iteration's device branch runs. Single-threaded, so the swap is atomic
+   with respect to any ONE event — but not to a multi-event session: a hold begun under
+   generation N can complete under N+1. The matcher rewrite must give tc_state a
+   generation and decide the session-vs-swap rule the spec schedules. */
 static tc_table g_table;
 
 /* Set once the numbering has been DISTURBED — which is NOT the same as "the
@@ -130,7 +137,8 @@ static void say(const char *fmt, ...) {
     tc_send_line(g_sock, line);
 }
 
-/* "T <gen> <hex>": decode, validate, hold, acknowledge.
+/* PRECONDITION: line[0] == 'T' (the caller dispatched on it); parsing starts at line + 1.
+   "T <gen> <hex>": decode, validate, hold, acknowledge.
    The line was read by tc_read_line, so it has no newline and fits TC_LINE_MAX.
    Every outcome is answered on the socket: "T ok <gen> <count>" or "T bad <gen> <why>".
    A rejected table changes nothing — g_table stays what it was. */
@@ -508,8 +516,8 @@ int main(int argc, char **argv) {
                 }
             }
             /* A line that overflowed the reader was discarded without a trace. Our own
-               app cannot produce one — the compiler caps a table well under TC_LINE_MAX —
-               which is exactly why it must not be silent if it ever happens. */
+               app cannot produce one — the app's rule compiler caps a table well under
+               TC_LINE_MAX — which is exactly why it must not be silent if it ever happens. */
             if (reader.dropped != 0) {
                 say("L dropped %u overlong line(s) from the app", reader.dropped);
                 reader.dropped = 0;

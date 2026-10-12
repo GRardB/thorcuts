@@ -29,6 +29,7 @@ class HelperSupervisor(
         private set
 
     @Volatile private var running = false
+    @Volatile private var stopRequested = false
     @Volatile private var server: LocalServerSocket? = null
     @Volatile private var out: OutputStream? = null
 
@@ -36,6 +37,7 @@ class HelperSupervisor(
     fun start() {
         if (running) return
         running = true
+        stopRequested = false
 
         // Self-heal. This covers a SIGKILL, a crash, or the app being swiped from
         // recents — the cases where neither the helper's own teardown nor a clean
@@ -122,6 +124,7 @@ class HelperSupervisor(
         // socket, and a second Stop has to be able to reach it.
         if (!running && !connected) return
 
+        stopRequested = true
         send(HelperCommand.Stop)
 
         // The helper writes "X stop requested" at once and THEN spends ~3s putting
@@ -302,7 +305,11 @@ class HelperSupervisor(
                 // anything said here would overwrite "exited: panic combo" with
                 // bookkeeping. The user sees why it stopped; Start simply works
                 // again.
-                Log.i(TAG, "helper gone unasked; supervisor reset so start() can bind again")
+                if (stopRequested) {
+                    Log.i(TAG, "helper exited after Stop; supervisor reset so start() can bind")
+                } else {
+                    Log.i(TAG, "helper gone unasked; supervisor reset so start() can bind again")
+                }
                 running = false
                 try { ss.close() } catch (_: Throwable) {}
                 server = null
@@ -351,7 +358,7 @@ class HelperSupervisor(
             connected = false
             out = null
             runCatching { client.close() }
-            if (!sawExit) onMessage(HelperMessage.Log("helper disconnected"))
+            if (!sawExit) onMessage(HelperMessage.Log(DISCONNECTED))
         }
     }
 
@@ -367,7 +374,10 @@ class HelperSupervisor(
     }
 
     private fun send(command: HelperCommand) {
-        val stream = out ?: return
+        val stream = out ?: run {
+            Log.w(TAG, "send ${command.wire.take(40)} dropped: no helper connected")
+            return
+        }
         val line = HelperProtocol.encode(command)
         try {
             synchronized(this) {
@@ -379,11 +389,11 @@ class HelperSupervisor(
         }
     }
 
-    private companion object {
-        const val TAG = "ThorcutsHelper"
-        const val SOCKET = "com.grardb.thorcuts.helper"
+    companion object {
+        private const val TAG = "ThorcutsHelper"
+        private const val SOCKET = "com.grardb.thorcuts.helper"
         /** Three pings inside the helper's 3s watchdog window. */
-        const val PING_INTERVAL_MS = 1000L
+        private const val PING_INTERVAL_MS = 1000L
 
         /**
          * How long stop() waits for the helper to disconnect. Its teardown
@@ -392,16 +402,22 @@ class HelperSupervisor(
          * long costs a slower Stop; erring short loses the helper's final
          * message and un-serialises a restart against the teardown.
          */
-        const val STOP_WAIT_MS = 8000L
-        const val STOP_POLL_MS = 50L
+        private const val STOP_WAIT_MS = 8000L
+        private const val STOP_POLL_MS = 50L
 
         /**
          * What to say when restoreNumbering() reports that pservice never ran the
          * cycle. Worded like the helper's own TC_TAKEOVER_RESTORE_FAILED line, in
          * native/src/takeover.c, because the user's situation is identical.
          */
-        const val RESTORE_FAILED =
+        private const val RESTORE_FAILED =
             "RESTORE FAILED — pservice did not run the cycle and the pad may still " +
                 "be deregistered. Use AYN's Controller style tile, or reboot."
+
+        /**
+         * The Log text serve() emits when the helper went away without saying why. Public
+         * so the UI can recognise "no helper, no table" without matching free text.
+         */
+        const val DISCONNECTED = "helper disconnected"
     }
 }

@@ -56,6 +56,9 @@ class RuleCompilerTest {
     fun `a disabled shortcut never applies`() {
         assertTrue(RuleCompiler.select(listOf(disabled), null).isEmpty())
         assertTrue(RuleCompiler.select(listOf(disabled), dolphin).isEmpty())
+        // The scope is not consulted at all for a disabled shortcut, Apps included.
+        val offInDolphin = shortcut("off-apps", Scope.Apps(setOf(dolphin)), enabled = false)
+        assertTrue(RuleCompiler.select(listOf(offInDolphin), dolphin).isEmpty())
     }
 
     @Test

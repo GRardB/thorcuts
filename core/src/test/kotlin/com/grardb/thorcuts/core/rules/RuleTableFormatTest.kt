@@ -52,6 +52,24 @@ class RuleTableFormatTest {
     }
 
     @Test
+    fun `every modifier bit encodes to the modifiers fixture, in bit order`() {
+        // One bare-modifier rule per ModifierKey, in entries order. Swapping any two bits on
+        // the Kotlin side changes these bytes; the C test pins the same file the other way.
+        // Pinned BY NAME as well: reordering the declarations and renumbering `bit` to
+        // match would keep the bytes identical and still disagree with TC_MOD_* in C.
+        assertEquals(
+            listOf(ModifierKey.AYN, ModifierKey.HOME, ModifierKey.BACK, ModifierKey.START,
+                ModifierKey.SELECT),
+            ModifierKey.entries.toList(),
+        )
+        val rules = ModifierKey.entries.map { Trigger(setOf(it)) }
+        assertContentEquals(
+            fixture("modifiers.bin"),
+            RuleTableFormat.encode(rules, generation = 3),
+        )
+    }
+
+    @Test
     fun `button order in the set does not change the bytes`() {
         val volumeUp = key(115, Device.GPIO)
         val a = Trigger(setOf(ModifierKey.AYN), linkedSetOf(key(311), key(304), volumeUp, key(310)))

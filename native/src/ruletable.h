@@ -2,7 +2,8 @@
 #define THORCUTS_RULETABLE_H
 
 /*
- * The rule table: what the app compiles and the helper matches from.
+ * The rule table: what the app compiles, and what the helper will match from once the
+ * matcher is rewritten. TODAY it is parsed and HELD, not consulted — see g_table in main.c.
  *
  * Little-endian, fixed-size records, parsed with bounded loops and no allocation:
  *
@@ -45,7 +46,7 @@ enum {
     TC_MOD_SELECT,
     TC_MOD_COUNT
 };
-#define TC_MOD_MASK_ALL 0x1F
+#define TC_MOD_MASK_ALL ((1u << TC_MOD_COUNT) - 1)   /* 0x1F */
 
 enum { TC_STYLE_PRESS = 0, TC_STYLE_HOLD = 1 };
 
@@ -107,7 +108,9 @@ tc_table_result tc_table_parse(const uint8_t *bytes, size_t n, uint32_t expected
 const char *tc_table_reason(tc_table_result r);
 
 /* Decode a hex string (either case) into out. Returns 0 and sets *out_len, or -1 for an
-   odd length, a non-hex character, or more than out_cap bytes. "" decodes to 0 bytes. */
+   odd length, a non-hex character, or more than out_cap bytes. "" decodes to 0 bytes.
+   On failure out may be PARTIALLY written (bytes before the first bad nibble); never
+   read it unless the return is 0. */
 int tc_hex_decode(const char *hex, uint8_t *out, size_t out_cap, size_t *out_len);
 
 #endif /* THORCUTS_RULETABLE_H */

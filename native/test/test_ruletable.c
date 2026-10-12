@@ -101,6 +101,26 @@ static void test_max_rules_fixture_parses(void) {
     CHECK(t.rules[63].style == TC_STYLE_PRESS);
 }
 
+static void test_modifiers_fixture_pins_every_bit(void) {
+    /* Rule i carries modifier bit i alone, in TC_MOD_* order. Reordering the enum on this
+       side, or ModifierKey.bit on the Kotlin side, breaks exactly one of the two suites. */
+    uint8_t buf[TC_TABLE_MAX_BYTES];
+    size_t n = load("modifiers.bin", buf, sizeof buf);
+    CHECK(n == TC_TABLE_HEADER + TC_MOD_COUNT * TC_RULE_BYTES);
+    tc_table t;
+    CHECK(tc_table_parse(buf, n, 3, &t, NULL) == TC_TABLE_OK);
+    CHECK(t.count == TC_MOD_COUNT);
+    CHECK(t.rules[TC_MOD_AYN].modifiers == 0x01);
+    CHECK(t.rules[TC_MOD_HOME].modifiers == 0x02);
+    CHECK(t.rules[TC_MOD_BACK].modifiers == 0x04);
+    CHECK(t.rules[TC_MOD_START].modifiers == 0x08);
+    CHECK(t.rules[TC_MOD_SELECT].modifiers == 0x10);
+    for (int i = 0; i < TC_MOD_COUNT; i++) {
+        CHECK(t.rules[i].button_count == 0);
+        CHECK(t.rules[i].style == TC_STYLE_PRESS);
+    }
+}
+
 static void test_full_u32_generation_parses(void) {
     /* The compiler never writes above Int.MAX_VALUE; the parser must still take the wire's u32. */
     uint8_t hdr[12] = { 'T', 'H', 'R', 'C', 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff };
@@ -286,6 +306,53 @@ static void test_rejects_clash(void) {
     CHECK(bad == 2);
 }
 
+static void test_rejection_at_the_last_rule_index(void) {
+    /* Every other rejection lands on rules 0-2 of a 3-rule table; this exercises the rule
+       stride at index 63, which the matcher's rules[0..count) loop will walk. */
+    uint8_t buf[TC_TABLE_MAX_BYTES];
+    size_t n = load("max-rules.bin", buf, sizeof buf);
+    CHECK(n == TC_TABLE_MAX_BYTES);
+    buf[TC_TABLE_HEADER + 63 * TC_RULE_BYTES + 2] = 7;   /* rule 63's style byte */
+    tc_table out;
+    memset(&out, 0xA5, sizeof out);
+    int bad = -2;
+    CHECK(tc_table_parse(buf, n, 2, &out, &bad) == TC_TABLE_STYLE);
+    CHECK(bad == 63);
+    uint8_t sentinel[sizeof out];
+    memset(sentinel, 0xA5, sizeof sentinel);
+    CHECK(memcmp(&out, sentinel, sizeof out) == 0);
+}
+
+static void test_unused_button_slots_read_back_zero(void) {
+    /* The matcher must be able to trust buttons[button_count..4) — pre-fill the output with
+       a sentinel and prove the parser overwrote the unused slots with zero. */
+    uint8_t buf[TC_TABLE_MAX_BYTES];
+    size_t n = load("kitchen-sink.bin", buf, sizeof buf);
+    tc_table t;
+    memset(&t, 0xA5, sizeof t);
+    CHECK(tc_table_parse(buf, n, 2147483647u, &t, NULL) == TC_TABLE_OK);
+    tc_control zero = { 0, 0, 0, 0 };
+    /* rule 0 has 2 buttons, rule 1 has 0, rule 2 has 4 */
+    CHECK(memcmp(&t.rules[0].buttons[2], &zero, sizeof zero) == 0);
+    CHECK(memcmp(&t.rules[0].buttons[3], &zero, sizeof zero) == 0);
+    for (int k = 0; k < TC_MAX_BUTTONS; k++) {
+        CHECK(memcmp(&t.rules[1].buttons[k], &zero, sizeof zero) == 0);
+    }
+}
+
+static void test_bad_rule_index_for_every_per_button_fault(void) {
+    /* device / type / style / reserved faults did not assert *bad_rule; now they do. */
+    int bad;
+    blob b = kitchen(); b.buf[R2 + 8 + 0] = 2; bad = -2;
+    CHECK(expect_bad(&b, GEN_KS, &bad) == TC_TABLE_DEVICE); CHECK(bad == 2);
+    blob c = kitchen(); c.buf[R2 + 8 + 1] = 2; bad = -2;
+    CHECK(expect_bad(&c, GEN_KS, &bad) == TC_TABLE_TYPE); CHECK(bad == 2);
+    blob d = kitchen(); d.buf[R0 + 2] = 2; bad = -2;
+    CHECK(expect_bad(&d, GEN_KS, &bad) == TC_TABLE_STYLE); CHECK(bad == 0);
+    blob e = kitchen(); e.buf[R1 + 3] = 1; bad = -2;
+    CHECK(expect_bad(&e, GEN_KS, &bad) == TC_TABLE_RESERVED); CHECK(bad == 1);
+}
+
 /* ---- the hex decoder ---- */
 
 static void test_hex_round_trip(void) {
@@ -389,6 +456,7 @@ int main(void) {
     RUN(test_m1_swap_fixture_parses);
     RUN(test_kitchen_sink_fixture_parses);
     RUN(test_max_rules_fixture_parses);
+    RUN(test_modifiers_fixture_pins_every_bit);
     RUN(test_full_u32_generation_parses);
     RUN(test_rejects_short);
     RUN(test_rejects_magic);
@@ -407,6 +475,9 @@ int main(void) {
     RUN(test_rejects_slot);
     RUN(test_rejects_order);
     RUN(test_rejects_clash);
+    RUN(test_rejection_at_the_last_rule_index);
+    RUN(test_unused_button_slots_read_back_zero);
+    RUN(test_bad_rule_index_for_every_per_button_fault);
     RUN(test_hex_round_trip);
     RUN(test_hex_accepts_uppercase);
     RUN(test_hex_refuses_odd_length);
