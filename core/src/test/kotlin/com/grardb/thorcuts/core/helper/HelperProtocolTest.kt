@@ -30,8 +30,18 @@ class HelperProtocolTest {
     }
 
     @Test
-    fun `parses fired`() {
-        assertEquals(HelperMessage.Fired(1), HelperProtocol.parse("F 1"))
+    fun `parses a fire as the installed generation and the rule index`() {
+        assertEquals(HelperMessage.Fired(generation = 1, index = 0), HelperProtocol.parse("F 1 0"))
+        assertEquals(HelperMessage.Fired(2147483647, 63), HelperProtocol.parse("F 2147483647 63"))
+    }
+
+    @Test
+    fun `rejects a fire that is not two non-negative numbers`() {
+        assertNull(HelperProtocol.parse("F 1"))            // M1's one-number shape is gone
+        assertNull(HelperProtocol.parse("F 1 x"))
+        assertNull(HelperProtocol.parse("F -1 0"))
+        assertNull(HelperProtocol.parse("F 1 -1"))
+        assertNull(HelperProtocol.parse("F 1 0 extra"))
     }
 
     @Test
@@ -93,12 +103,18 @@ class HelperProtocolTest {
     }
 
     @Test
-    fun `parses a table acknowledgement`() {
-        assertEquals(HelperMessage.TableAccepted(1, 1), HelperProtocol.parse("T ok 1 1"))
-        assertEquals(HelperMessage.TableAccepted(7, 0), HelperProtocol.parse("T ok 7 0"))
+    fun `parses a table acknowledgement, installed or deferred`() {
         assertEquals(
-            HelperMessage.TableAccepted(2147483647, 64),
-            HelperProtocol.parse("T ok 2147483647 64"),
+            HelperMessage.TableAccepted(1, 1, installed = true),
+            HelperProtocol.parse("T ok 1 1 installed"),
+        )
+        assertEquals(
+            HelperMessage.TableAccepted(7, 0, installed = false),
+            HelperProtocol.parse("T ok 7 0 deferred"),
+        )
+        assertEquals(
+            HelperMessage.TableAccepted(2147483647, 64, installed = true),
+            HelperProtocol.parse("T ok 2147483647 64 installed"),
         )
     }
 
@@ -117,11 +133,13 @@ class HelperProtocolTest {
         assertNull(HelperProtocol.parse("T"))
         assertNull(HelperProtocol.parse("T ok"))
         assertNull(HelperProtocol.parse("T ok 1"))
-        assertNull(HelperProtocol.parse("T ok x 1"))
-        assertNull(HelperProtocol.parse("T ok 1 x"))
-        assertNull(HelperProtocol.parse("T ok 1 1 extra"))
-        assertNull(HelperProtocol.parse("T ok -1 1"))
-        assertNull(HelperProtocol.parse("T nope 1 1"))
+        assertNull(HelperProtocol.parse("T ok 1 1"))               // the three-word shape is gone
+        assertNull(HelperProtocol.parse("T ok x 1 installed"))
+        assertNull(HelperProtocol.parse("T ok 1 x installed"))
+        assertNull(HelperProtocol.parse("T ok 1 1 later"))
+        assertNull(HelperProtocol.parse("T ok 1 1 installed extra"))
+        assertNull(HelperProtocol.parse("T ok -1 1 installed"))
+        assertNull(HelperProtocol.parse("T nope 1 1 installed"))
         assertNull(HelperProtocol.parse("T bad 1"))
         assertNull(HelperProtocol.parse("T bad 1 "))
     }

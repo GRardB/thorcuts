@@ -6,8 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Bootstrap
-import com.grardb.thorcuts.core.rules.CompiledTable
+import com.grardb.thorcuts.core.rules.FireResolution
+import com.grardb.thorcuts.core.rules.RetainedTables
 import com.grardb.thorcuts.core.rules.RuleCompiler
+import com.grardb.thorcuts.platform.actions.ActionDispatcher
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.privilege.Privilege
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
@@ -41,6 +43,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val gateway = PserviceGateway(app)
     private val tasks = TaskActions(gateway)
+    private val dispatcher = ActionDispatcher(tasks)
     private val helper = HelperSupervisor(app, gateway, ::onHelperMessage)
 
     /**
@@ -55,19 +58,13 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
     private var tableGeneration = 0
 
     /**
-     * The table most recently compiled and handed to pushTable() -- which can drop it
-     * silently if the socket is gone, so "pushed" means offered, not acknowledged. Kept
-     * so a rule index the helper reports can be
-     * resolved back to its Shortcut. Rule i of [CompiledTable.bytes] is
-     * [CompiledTable.shortcuts]`[i]`, and [CompiledTable.generation] says which push.
-     *
-     * RETENTION DEPTH IS NOT DECIDED HERE. Only the latest table is kept for now, which
-     * is enough for the acknowledgement check below. The matcher rewrite — the piece that
-     * makes `F <gen> <index>` real — must state how many generations the app keeps; a hold
-     * session can straddle a push, so "current plus previous" is the expected answer.
-     * Written on the accept thread in the Ready branch; read there in TableAccepted.
+     * Every table pushed since the helper last reported one `installed`, plus that one —
+     * the matcher spec's retention rule, implemented by RetainedTables. A fire names the
+     * INSTALLED generation and a rule index; it resolves here to the Shortcut it means.
+     * Written on the accept thread (Ready pushes, TableAccepted prunes) and read there
+     * (Fired resolves); one thread, so no lock.
      */
-    @Volatile private var pushedTable: CompiledTable? = null
+    @Volatile private var tables = RetainedTables()
 
     private val _state = MutableStateFlow(DiagnosticsState(gatewayName = gateway.name))
     val state: StateFlow<DiagnosticsState> = _state.asStateFlow()
@@ -151,7 +148,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 // in this app, and killing the connection is the right outcome for that.
                 try {
                     val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, null, ++tableGeneration)
-                    pushedTable = table
+                    tables = tables.push(table)
                     helper.pushTable(table)
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "TABLE_PUSH_FAILED gen=$tableGeneration: ${e.message}")
@@ -181,35 +178,47 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             is HelperMessage.Fired -> {
-                _state.update {
-                    it.copy(eventLog = (listOf("FIRED rule ${message.ruleId}") + it.eventLog).take(40))
-                }
-                if (message.ruleId == RULE_SWAP_SCREENS) {
-                    // Arrives on the helper's reader thread. The swap blocks and needs
-                    // uid 0, so it must hop to the one privileged thread.
-                    //
-                    // Privilege.scope, NOT viewModelScope — and NOT privileged{}.
-                    // The helper outlives this ViewModel on purpose: it keeps the
-                    // controller grabbed and keeps swallowing AYN+X after the
-                    // diagnostics Activity finishes, for as long as the process
-                    // lives. A viewModelScope.launch is a silent no-op once the
-                    // ViewModel is cleared, so a combo pressed after a back press
-                    // was eaten by the helper and then dropped here: no swap, no
-                    // key reaching the game, nothing reporting it. Privilege.scope
-                    // runs on the same single privileged thread, so this stays
-                    // serialised against every UI-driven call (see Privilege.kt);
-                    // it just does not die with the screen.
-                    Privilege.scope.launch {
-                        // swapScreens() returns the tool's result line verbatim, NOT a
-                        // boolean. Pass it through and mark that the combo drove it, so
-                        // a one-sided move and a partial failure stay readable.
-                        val outcome = tasks.swapScreens()
-                        // Logged as well as stored: when the combo fires with no
-                        // Activity up, _state has no collector and this line is the
-                        // only trace the swap happened. Safe either way —
-                        // MutableStateFlow just holds the value.
-                        Log.i(TAG, "COMBO_SWAP outcome=$outcome")
-                        _state.update { it.copy(lastSwap = "$outcome (AYN+X)") }
+                val gen = message.generation
+                val index = message.index
+                when (val res = tables.resolve(gen, index)) {
+                    is FireResolution.Hit -> {
+                        val id = res.shortcut.id
+                        Log.i(TAG, "FIRED gen=$gen index=$index shortcut=$id")
+                        val head = "FIRED gen $gen #$index $id"
+                        _state.update {
+                            it.copy(eventLog = (listOf(head) + it.eventLog).take(40))
+                        }
+                        // Privilege.scope, NOT viewModelScope — and NOT privileged{}.
+                        // The helper outlives this ViewModel on purpose: it keeps the
+                        // controller grabbed and keeps swallowing the combo after the
+                        // diagnostics Activity finishes, for as long as the process
+                        // lives. A viewModelScope.launch is a silent no-op once the
+                        // ViewModel is cleared (measured in M1: the combo was eaten and
+                        // nothing happened). Privilege.scope runs on the same single
+                        // privileged thread, so this stays serialised against every
+                        // UI-driven call; it just does not die with the screen.
+                        Privilege.scope.launch {
+                            // The outcome is the tool's own line, verbatim, never a boolean.
+                            val outcome = dispatcher.dispatch(res.shortcut.action)
+                            Log.i(TAG, "FIRE_OUTCOME gen=$gen index=$index shortcut=$id " +
+                                "outcome=$outcome")
+                            val row = "FIRED gen $gen #$index $id -> $outcome"
+                            _state.update {
+                                it.copy(
+                                    lastSwap = "$outcome ($id)",
+                                    eventLog = (listOf(row) + it.eventLog).take(40),
+                                )
+                            }
+                        }
+                    }
+                    is FireResolution.Stale, is FireResolution.OutOfRange -> {
+                        // A fire from a table we no longer hold, or an index the table
+                        // does not have. Nothing runs; the row says why.
+                        Log.w(TAG, "FIRE_UNRESOLVED gen=$gen index=$index: $res")
+                        val row = "FIRED gen $gen #$index UNRESOLVED: $res"
+                        _state.update {
+                            it.copy(eventLog = (listOf(row) + it.eventLog).take(40))
+                        }
                     }
                 }
             }
@@ -218,20 +227,20 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(eventLog = (listOf(row) + it.eventLog).take(40))
             }
             is HelperMessage.TableAccepted -> {
-                val pushed = pushedTable
-                if (pushed == null || pushed.generation != message.generation) {
-                    Log.w(
-                        TAG,
-                        "TABLE_ACK gen=${message.generation} does not match the pushed " +
-                            "gen=${pushed?.generation}",
-                    )
-                }
-                Log.i(TAG, "TABLE_ACK gen=${message.generation} rules=${message.ruleCount}")
                 val gen = message.generation
-                val line = "TABLE gen $gen ok, ${message.ruleCount} rule(s)"
+                if (tables.tables.none { it.generation == gen }) {
+                    Log.w(TAG, "TABLE_ACK gen=$gen matches no pushed table")
+                }
+                // `installed` is the helper's proof that nothing older than gen can fire
+                // again: a session fires only from the installed table, and a push during
+                // a session is deferred until it closes. Prune on it; keep on deferred.
+                if (message.installed) tables = tables.installed(gen)
+                val how = if (message.installed) "installed" else "deferred"
+                Log.i(TAG, "TABLE_ACK gen=$gen rules=${message.ruleCount} $how")
+                val line = "TABLE gen $gen ok, ${message.ruleCount} rule(s), $how"
                 _state.update {
                     it.copy(
-                        tableState = "table gen $gen: ${message.ruleCount} rule(s)",
+                        tableState = "table gen $gen: ${message.ruleCount} rule(s), $how",
                         eventLog = (listOf(line) + it.eventLog).take(40),
                     )
                 }
@@ -281,8 +290,5 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val TAG = "ThorcutsDiag"
-
-        /** Must match TC_RULE_SWAP_SCREENS in native/src/matcher.h. */
-        const val RULE_SWAP_SCREENS = 1
     }
 }

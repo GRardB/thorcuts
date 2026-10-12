@@ -11,8 +11,9 @@ sealed interface HelperMessage {
     /** One raw evdev event. [value] is signed: ABS_HAT0X reports -1 / 0 / +1. */
     data class Event(val device: Int, val type: Int, val code: Int, val value: Int) : HelperMessage
 
-    /** A rule matched. */
-    data class Fired(val ruleId: Int) : HelperMessage
+    /** A rule matched: rule [index] of the table the helper has INSTALLED as [generation].
+     *  The app resolves it against the tables it retained (RetainedTables). */
+    data class Fired(val generation: Int, val index: Int) : HelperMessage
 
     /** Diagnostic text. */
     data class Log(val text: String) : HelperMessage
@@ -20,8 +21,11 @@ sealed interface HelperMessage {
     /** The helper is shutting down, having released every device. */
     data class Exiting(val reason: String) : HelperMessage
 
-    /** The helper holds the table we pushed as [generation]; it has [ruleCount] rules. */
-    data class TableAccepted(val generation: Int, val ruleCount: Int) : HelperMessage
+    /** The helper accepted the table pushed as [generation], with [ruleCount] rules.
+     *  [installed] means it is matching from it now; false means a session was open and
+     *  it will install at that session's close ("deferred"). */
+    data class TableAccepted(val generation: Int, val ruleCount: Int, val installed: Boolean) :
+        HelperMessage
 
     /** The helper refused the table pushed as [generation]; nothing changed. [reason] is the
      *  helper's token, e.g. `hold rule 2`, `magic`, `hex`, `line`. */
@@ -79,7 +83,14 @@ object HelperProtocol {
 
         return when (tag) {
             "R" -> rest.toIntOrNull()?.let { HelperMessage.Ready(it) }
-            "F" -> rest.toIntOrNull()?.let { HelperMessage.Fired(it) }
+            "F" -> {
+                val p = rest.split(' ')
+                if (p.size != 2) return null
+                val gen = p[0].toIntOrNull() ?: return null
+                val index = p[1].toIntOrNull() ?: return null
+                if (gen < 0 || index < 0) return null
+                HelperMessage.Fired(gen, index)
+            }
             "E" -> {
                 val p = rest.split(' ')
                 if (p.size != 4) return null
@@ -96,8 +107,18 @@ object HelperProtocol {
                 val gen = p[1].toIntOrNull() ?: return null
                 if (gen < 0) return null
                 when (p[0]) {
-                    "ok" -> p[2].toIntOrNull()?.takeIf { it >= 0 }
-                        ?.let { HelperMessage.TableAccepted(gen, it) }
+                    "ok" -> {
+                        // "<count> installed" or "<count> deferred" — exactly two words.
+                        val q = p[2].split(' ')
+                        if (q.size != 2) return null
+                        val count = q[0].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+                        val installed = when (q[1]) {
+                            "installed" -> true
+                            "deferred" -> false
+                            else -> return null
+                        }
+                        HelperMessage.TableAccepted(gen, count, installed)
+                    }
                     "bad" -> if (p[2].isBlank()) null else HelperMessage.TableRejected(gen, p[2])
                     else -> null
                 }
