@@ -20,10 +20,12 @@
 #include "evdev.h"
 #include "matcher.h"
 #include "net.h"
+#include "ruletable.h"
 #include "takeover.h"
 #include "uinput.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <linux/uinput.h>
 #include <poll.h>
 #include <signal.h>
@@ -44,6 +46,12 @@ static tc_uinput g_vpad;
 static tc_uinput g_vgpio;
 static int       g_sock = -1;
 static volatile sig_atomic_t g_signalled = 0;
+
+/* The rule table the app last pushed. HELD, NOT CONSULTED: matcher.c still runs M1's
+   hardcoded AYN + X rule, and nothing reads this yet. The matcher rewrite — the next
+   piece — replaces that rule with this table. Zero-initialised: an empty table at
+   generation 0, which is also what an app that never pushes gets. */
+static tc_table g_table;
 
 /* Set once the numbering has been DISTURBED — which is NOT the same as "the
    takeover succeeded", and conflating the two was a defect. This flag was
@@ -122,6 +130,49 @@ static void say(const char *fmt, ...) {
     tc_send_line(g_sock, line);
 }
 
+/* "T <gen> <hex>": decode, validate, hold, acknowledge.
+   The line was read by tc_read_line, so it has no newline and fits TC_LINE_MAX.
+   Every outcome is answered on the socket: "T ok <gen> <count>" or "T bad <gen> <why>".
+   A rejected table changes nothing — g_table stays what it was. */
+static void handle_table(const char *line) {
+    /* Exactly 'T', one space, decimal digits, one space, hex to the end. */
+    const char *p = line + 1;
+    if (*p != ' ' || !(p[1] >= '0' && p[1] <= '9')) {
+        say("T bad 0 line");
+        return;
+    }
+    p++;
+    char *end = NULL;
+    errno = 0;
+    unsigned long gen = strtoul(p, &end, 10);
+    if (errno != 0 || end == p || *end != ' ' || gen > 0xFFFFFFFFul) {
+        say("T bad 0 line");
+        return;
+    }
+    const char *hex = end + 1;
+
+    uint8_t bytes[TC_TABLE_MAX_BYTES];
+    size_t n = 0;
+    if (tc_hex_decode(hex, bytes, sizeof bytes, &n) != 0) {
+        say("T bad %lu hex", gen);
+        return;
+    }
+
+    tc_table parsed;
+    int bad_rule = -1;
+    tc_table_result r = tc_table_parse(bytes, n, (uint32_t)gen, &parsed, &bad_rule);
+    if (r != TC_TABLE_OK) {
+        if (bad_rule >= 0) {
+            say("T bad %lu %s rule %d", gen, tc_table_reason(r), bad_rule);
+        } else {
+            say("T bad %lu %s", gen, tc_table_reason(r));
+        }
+        return;
+    }
+    g_table = parsed;
+    say("T ok %lu %u", gen, (unsigned)parsed.count);
+}
+
 static void leave(const char *reason) {
     say("X %s", reason);
     release_all();
@@ -198,7 +249,7 @@ int main(int argc, char **argv) {
        while another is still connected never receives it and simply leaves. */
     {
         struct pollfd p = {.fd = g_sock, .events = POLLIN};
-        char line[512];
+        char line[TC_LINE_MAX];
         bool shaken = false;
         int64_t deadline = now_ms() + 5000;
         while (!shaken && now_ms() < deadline) {
@@ -442,7 +493,7 @@ int main(int argc, char **argv) {
         /* --- the app's side of the channel --- */
         if (fds[sock_i].revents & (POLLHUP | POLLERR)) leave("socket closed");
         if (fds[sock_i].revents & POLLIN) {
-            char line[512];
+            char line[TC_LINE_MAX];
             int r;
             while ((r = tc_read_line(&reader, line, sizeof line)) == 1) {
                 if (line[0] == 'P') {
@@ -452,7 +503,16 @@ int main(int argc, char **argv) {
                 } else if (line[0] == 'M') {
                     capture = strstr(line, "capture") != NULL;
                     say("L mode %s", capture ? "capture" : "match");
+                } else if (line[0] == 'T') {
+                    handle_table(line);
                 }
+            }
+            /* A line that overflowed the reader was discarded without a trace. Our own
+               app cannot produce one — the compiler caps a table well under TC_LINE_MAX —
+               which is exactly why it must not be silent if it ever happens. */
+            if (reader.dropped != 0) {
+                say("L dropped %u overlong line(s) from the app", reader.dropped);
+                reader.dropped = 0;
             }
             /* The socket IS the lifeline. Losing it means the matcher is gone,
                so the devices must not stay grabbed. */

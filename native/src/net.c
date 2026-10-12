@@ -120,6 +120,7 @@ int tc_send_line(int fd, const char *line) {
 void tc_lines_init(tc_lines *r, int fd) {
     r->fd = fd;
     r->len = 0;
+    r->dropped = 0;
 }
 
 int tc_read_line(tc_lines *r, char *out, size_t out_sz) {
@@ -135,8 +136,10 @@ int tc_read_line(tc_lines *r, char *out, size_t out_sz) {
             return 1;
         }
         if (r->len == sizeof r->buf) {
-            /* An overlong line: drop it rather than grow without bound. */
+            /* An overlong line: drop it rather than grow without bound — and COUNT it,
+               so main.c can say so. */
             r->len = 0;
+            r->dropped++;
             return 0;
         }
         ssize_t got = read(r->fd, r->buf + r->len, sizeof r->buf - r->len);
