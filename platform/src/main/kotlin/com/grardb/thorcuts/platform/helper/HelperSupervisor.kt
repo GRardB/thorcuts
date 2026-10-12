@@ -36,26 +36,38 @@ class HelperSupervisor(
         if (running) return
         running = true
 
-        // Self-heal. This is the layer that covers a SIGKILL, a crash, or the app
-        // being swiped from recents — the cases where neither the helper nor a
-        // clean stop could run. A pad sitting at 2 with no twin of ours to justify
-        // it is exactly the condition that breaks Dolphin, and the user has no way
-        // to connect the two facts.
+        // Self-heal. This covers a SIGKILL, a crash, or the app being swiped from
+        // recents — the cases where neither the helper's own teardown nor a clean
+        // stop could run, and where a pad left renumbered (or deregistered
+        // outright) is exactly what breaks the emulators this feature exists to
+        // fix, with nothing on screen to connect the two facts.
+        //
+        // IT RUNS HERE, WHICH IS WHEN THE USER TAPS START — NOT WHEN THE APP
+        // OPENS. Nothing auto-starts the helper, so a user who opens Thorcuts to
+        // find out why their controller is broken, sees "not started" and does not
+        // tap Start gets no repair. The design once called this "self-heal at
+        // launch"; that was wrong and is corrected in the spec. Tapping Start is
+        // the natural next action, so the gap is modest, but it is a gap.
         //
         // Acts ONLY on RESTORE. TAKE_OVER is deliberately ignored here: assess()
-        // describes what the numbering needs, not what we intend, and taking the
-        // controller over merely because the app opened would be wrong.
+        // describes what the numbering needs, not what we intend. Whether to take
+        // over is launch()'s decision, made below from a settled sample, and the
+        // helper's to execute.
         //
-        // RESTORE now also covers "no Thor pad registered AT ALL" — the state a
-        // crash midway through the helper's takeover leaves behind, and the state
-        // this layer was always claimed to cover. It is safe here specifically
-        // because this runs BEFORE launch(): the window in which the pad is
-        // legitimately absent has not opened yet.
+        // RESTORE also covers "no Thor pad registered AT ALL" — the state a crash
+        // midway through the helper's takeover leaves behind, and the state this
+        // layer exists to cover. That is safe here SPECIFICALLY because this runs
+        // BEFORE launch(): the one window in which the pad is legitimately absent
+        // is our own takeover's deregister, and it has not opened yet, so an
+        // empty list here cannot be our doing.
         //
-        // The PLAIN assess() is correct here, and only here: nothing in this
+        // The PLAIN assess() is correct here, and ONLY here: nothing in this
         // process has written the trigger key yet, so there is no re-enumeration
         // in flight to wait out. Every sample taken AFTER a write of ours goes
-        // through assessAfterSettle() instead.
+        // through assessAfterSettle() instead — `settings put` returns as soon as
+        // the value is stored, the pad is absent for seconds afterwards, and an
+        // early sample reads that transient absence as RESTORE. Do not collapse
+        // the two into one call.
         val onStart = ControllerNumbers.assess()
         Log.i(TAG, "PAD_ASSESS start action=${onStart.action} why=${onStart.why}")
         if (onStart.action == PadAction.RESTORE) {

@@ -82,10 +82,14 @@ object PadState {
             // SIGKILL midway through the helper's takeover leaves behind: the
             // trigger key is still 1, so AYN has deregistered its pad and Android
             // reports no gamepad at all. It is the worst state this project can
-            // create, and teardown layer 3 only covers the SIGKILL case if the
-            // decision here says RESTORE -- reporting it would leave the owner
-            // with a dead controller and nothing but AYN's Quick Settings tile or
-            // a reboot to get out of it.
+            // create, and teardown layer 3 only covers it if the decision here
+            // says RESTORE -- reporting it would leave the owner with a dead
+            // controller and nothing but AYN's Quick Settings tile or a reboot to
+            // get out of it.
+            //
+            // Note what layer 3 does NOT cover: it runs in HelperSupervisor.start(),
+            // i.e. when the user taps Start helper, and nothing auto-starts the
+            // helper. Opening the app alone repairs nothing.
             //
             // It cannot race our own takeover: the self-heal runs in
             // HelperSupervisor.start() BEFORE the helper is launched, so the
