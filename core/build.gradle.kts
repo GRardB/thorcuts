@@ -38,3 +38,11 @@ tasks.test {
     useJUnitPlatform()
     testLogging { events("passed", "failed", "skipped") }
 }
+
+// The golden rule-table fixtures live at the repo root so native/test/run.sh reads the
+// very same bytes. On the test classpath they appear as /ruletable/<name>.bin.
+sourceSets {
+    named("test") {
+        resources.srcDir("../fixtures")
+    }
+}
