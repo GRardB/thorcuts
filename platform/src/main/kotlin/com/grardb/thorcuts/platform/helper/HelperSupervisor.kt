@@ -252,6 +252,29 @@ class HelperSupervisor(
                 return
             }
             serve(client)
+
+            if (running) {
+                // The helper went away without us asking: the panic combo, its
+                // watchdog, a crash, a kill. Nothing is going to reconnect, so
+                // tear the session down here rather than looping back into
+                // accept(). Leaving `running` true made the next Start a SILENT
+                // no-op — start() returns at its first guard, before even the
+                // self-heal — while this thread sat in accept() holding the
+                // abstract name. Measured on hardware 2026-10-12: after a panic
+                // combo, tapping Start produced no log line at all and the screen
+                // still read "exited: panic combo".
+                //
+                // Deliberately silent. serve()'s finally has just reported the
+                // real reason, and DiagnosticsViewModel keeps ONE message slot, so
+                // anything said here would overwrite "exited: panic combo" with
+                // bookkeeping. The user sees why it stopped; Start simply works
+                // again.
+                Log.i(TAG, "helper gone unasked; supervisor reset so start() can bind again")
+                running = false
+                try { ss.close() } catch (_: Throwable) {}
+                server = null
+                return
+            }
         }
     }
 
