@@ -3,6 +3,7 @@ package com.grardb.thorcuts.platform.helper
 import android.content.Context
 import android.net.LocalServerSocket
 import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.os.SystemClock
 import android.util.Log
 import com.grardb.thorcuts.core.helper.HelperCommand
@@ -143,6 +144,22 @@ class HelperSupervisor(
         }
 
         running = false
+
+        // Wake the accept thread before closing, or the socket never goes away.
+        // LocalServerSocket.close() does NOT interrupt a thread already blocked in
+        // accept(), and until that call returns the abstract name stays bound — so
+        // the next start() fails with "Address already in use" and the helper can
+        // never be restarted without killing the app. MEASURED on hardware
+        // 2026-10-12: /proc/net/unix still listed @com.grardb.thorcuts.helper as
+        // listening, with the accept thread sleeping, long after stop() returned.
+        //
+        // Connecting to ourselves unblocks it. The accept returns our throwaway
+        // client, serve() refuses it on the uid check that exists for exactly this
+        // class of caller, and the loop then sees running == false and exits,
+        // releasing the name.
+        runCatching {
+            LocalSocket().use { it.connect(LocalSocketAddress(SOCKET)) }
+        }
         try { server?.close() } catch (_: Throwable) {}
         server = null
 
