@@ -41,6 +41,12 @@ object ControllerNumbers {
                 vendorId = it.vendorId,
                 productId = it.productId,
                 name = it.name,
+                // AYN's virtual mouse carries the pad's vendor AND product
+                // verbatim, so the ids cannot tell them apart; the source bits
+                // can. This mirrors the capability match the helper has always
+                // used on its side.
+                isGamepad = it.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
+                    it.supportsSource(InputDevice.SOURCE_JOYSTICK),
             )
         }
 

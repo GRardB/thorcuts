@@ -12,6 +12,21 @@ data class PadDevice(
     val vendorId: Int,
     val productId: Int,
     val name: String,
+    /**
+     * Whether Android reports this device as a gamepad or joystick.
+     *
+     * Load-bearing, not descriptive. AYN ships an "ODIN Station Virtual Mouse"
+     * carrying the pad's vendor AND product verbatim (measured: both are
+     * 0x2020/0x0111), so ids alone match two devices and the numbering reads as
+     * [0, 1] — an arrangement [PadState.assess] rightly refuses to act on, which
+     * silently disabled the takeover entirely. The helper has always matched the
+     * pad by capability for this exact reason; this is the same test on this side
+     * of the process boundary.
+     *
+     * Computed by the platform adapter from InputDevice.getSources() rather than
+     * named here, so :core stays free of framework constants.
+     */
+    val isGamepad: Boolean,
 )
 
 /** What, if anything, the controller numbering needs. */
@@ -51,9 +66,13 @@ object PadState {
      */
     val AYN_PRODUCTS = setOf(0x0111, 0x0112)
 
-    /** Only the Thor's own pad. An external controller is not ours to renumber. */
+    /**
+     * Only the Thor's own pad. An external controller is not ours to renumber,
+     * and neither is AYN's virtual mouse — which carries the pad's vendor and
+     * product verbatim, so [PadDevice.isGamepad] is what tells them apart.
+     */
     fun thorPads(all: List<PadDevice>): List<PadDevice> =
-        all.filter { it.vendorId == AYN_VENDOR && it.productId in AYN_PRODUCTS }
+        all.filter { it.isGamepad && it.vendorId == AYN_VENDOR && it.productId in AYN_PRODUCTS }
 
     fun assess(all: List<PadDevice>): PadAssessment {
         val pads = thorPads(all).sortedBy { it.controllerNumber }

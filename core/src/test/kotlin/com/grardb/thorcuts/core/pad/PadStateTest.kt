@@ -7,7 +7,13 @@ import kotlin.test.assertTrue
 class PadStateTest {
 
     private fun ayn(number: Int, product: Int = 0x0111, name: String = "Odin Controller") =
-        PadDevice(controllerNumber = number, vendorId = 0x2020, productId = product, name = name)
+        PadDevice(
+            controllerNumber = number,
+            vendorId = 0x2020,
+            productId = product,
+            name = name,
+            isGamepad = true,
+        )
 
     @Test
     fun `AYN's pad alone at 1 means a takeover is available`() {
@@ -57,8 +63,8 @@ class PadStateTest {
         // that drives the decision. The filter, not an empty input, must produce
         // RESTORE -- otherwise a user with an external pad plugged in would be
         // left unhealed in precisely the state this exists to heal.
-        val keyboard = PadDevice(controllerNumber = 0, vendorId = 0x1234, productId = 0x5678, name = "kbd")
-        val external = PadDevice(controllerNumber = 1, vendorId = 0x045e, productId = 0x02ea, name = "Xbox One")
+        val keyboard = PadDevice(0, 0x1234, 0x5678, "kbd", isGamepad = false)
+        val external = PadDevice(1, 0x045e, 0x02ea, "Xbox One", isGamepad = true)
         assertEquals(PadAction.RESTORE, PadState.assess(listOf(keyboard, external)).action)
     }
 
@@ -68,9 +74,26 @@ class PadStateTest {
     }
 
     @Test
+    fun `AYN's virtual mouse shares the pad's ids and must not count as a pad`() {
+        // MEASURED on the device: "ODIN Station Virtual Mouse" reports
+        // vendor=0x2020 product=0x0111, exactly the pad's, at ControllerNumber 0.
+        // Filtering on ids alone saw [0, 1], called it unexpected, and refused to
+        // take over at all -- the takeover silently never ran.
+        val mouse = PadDevice(
+            controllerNumber = 0,
+            vendorId = 0x2020,
+            productId = 0x0111,
+            name = "ODIN Station Virtual Mouse",
+            isGamepad = false,
+        )
+        assertEquals(PadAction.TAKE_OVER, PadState.assess(listOf(mouse, ayn(1))).action)
+        assertEquals(1, PadState.thorPads(listOf(mouse, ayn(1))).size)
+    }
+
+    @Test
     fun `devices that are not the Thor pad are ignored entirely`() {
-        val keyboard = PadDevice(controllerNumber = 0, vendorId = 0x1234, productId = 0x5678, name = "kbd")
-        val external = PadDevice(controllerNumber = 3, vendorId = 0x045e, productId = 0x02ea, name = "Xbox One")
+        val keyboard = PadDevice(0, 0x1234, 0x5678, "kbd", isGamepad = false)
+        val external = PadDevice(3, 0x045e, 0x02ea, "Xbox One", isGamepad = true)
         assertEquals(PadAction.TAKE_OVER, PadState.assess(listOf(keyboard, external, ayn(1))).action)
     }
 
