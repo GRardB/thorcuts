@@ -1,26 +1,5 @@
 #include "../src/matcher.h"
-
-#include <stdio.h>
-
-static int g_checks = 0;
-static int g_failures = 0;
-static const char *g_test = "";
-
-#define CHECK(cond)                                                       \
-    do {                                                                  \
-        g_checks++;                                                       \
-        if (!(cond)) {                                                    \
-            g_failures++;                                                 \
-            printf("    FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);    \
-        }                                                                 \
-    } while (0)
-
-#define RUN(fn)                    \
-    do {                           \
-        g_test = #fn;              \
-        printf("  %s\n", #fn);     \
-        fn();                      \
-    } while (0)
+#include "check.h"
 
 /* ---- helpers ---- */
 
