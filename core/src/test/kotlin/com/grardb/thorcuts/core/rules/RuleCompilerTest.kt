@@ -1,14 +1,16 @@
 package com.grardb.thorcuts.core.rules
 
+import com.grardb.thorcuts.core.config.Defaults
 import com.grardb.thorcuts.core.model.Action
-import com.grardb.thorcuts.core.model.Bootstrap
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
+import com.grardb.thorcuts.core.model.TriggerStyle
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -67,14 +69,49 @@ class RuleCompilerTest {
         assertEquals(listOf("dolphin", "global"), ids(selected))
     }
 
+    /**
+     * The three-rule list the matcher rewrite shipped as its bootstrap. `Bootstrap` is gone
+     * (the config layer replaced it), so the list lives here as test data and bootstrap.bin
+     * stays pinned.
+     */
+    private val threeRules = listOf(
+        Shortcut(
+            id = "m1-swap-screens",
+            trigger = Trigger(
+                setOf(ModifierKey.AYN), setOf(Defaults.X), TriggerStyle.HOLD, holdMs = 400,
+            ),
+            action = Action.SwapScreens,
+        ),
+        Shortcut(
+            id = "dpad-left-closes",
+            trigger = Trigger(
+                setOf(ModifierKey.AYN), setOf(Control(Device.PAD, EvdevType.ABS, 16, -1)),
+            ),
+            action = Action.CloseScreen(ScreenTarget.FOCUSED),
+        ),
+        Shortcut(
+            id = "tap-ayn-opens",
+            trigger = Trigger(setOf(ModifierKey.AYN)),
+            action = Action.OpenThorcuts(ScreenTarget.TOP),
+        ),
+    )
+
     @Test
-    fun `the bootstrap compiles to the bootstrap fixture at generation 1`() {
-        val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, foreground = null, generation = 1)
+    fun `the three-rule bootstrap list compiles to the bootstrap fixture at generation 1`() {
+        val table = RuleCompiler.compile(threeRules, foreground = null, generation = 1)
         assertContentEquals(fixture("bootstrap.bin"), table.bytes)
         assertEquals(1, table.generation)
         assertEquals(3, table.ruleCount)
-        assertEquals(Bootstrap.SHORTCUTS, table.shortcuts)
+        assertEquals(threeRules, table.shortcuts)
         assertEquals(RuleTableFormat.hex(table.bytes), table.hex)
+    }
+
+    @Test
+    fun `the default config compiles to the m1-swap fixture at generation 1`() {
+        // Ids are not encoded, so the one-rule default and M1's bootstrap share the bytes.
+        val table = RuleCompiler.compile(Defaults.CONFIG.shortcuts, null, generation = 1)
+        assertContentEquals(fixture("m1-swap.bin"), table.bytes)
+        assertEquals(listOf(Defaults.SWAP_SCREENS), table.shortcuts)
     }
 
     @Test

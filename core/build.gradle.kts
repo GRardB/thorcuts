@@ -29,6 +29,11 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 dependencies {
+    // The config codec walks a JSON tree; no compiler plugin, no @Serializable (config spec).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    // ConfigStore is a coroutine actor on its own single thread (parent spec §8).
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -4,8 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.grardb.thorcuts.core.config.Defaults
 import com.grardb.thorcuts.core.helper.HelperMessage
-import com.grardb.thorcuts.core.model.Bootstrap
 import com.grardb.thorcuts.core.rules.FireResolution
 import com.grardb.thorcuts.core.rules.RetainedTables
 import com.grardb.thorcuts.core.rules.RuleCompiler
@@ -136,7 +136,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             is HelperMessage.Ready -> {
                 _state.update { it.copy(helperState = "ready, ${message.deviceCount} devices") }
                 // Push the rule table NOW, on Ready, and never earlier — see pushTable().
-                // Bootstrap.SHORTCUTS is M1's one rule until the config layer exists.
+                // Defaults.CONFIG until ConfigStore takes this over (config layer, Task 5).
                 // foreground = null until M4's monitor exists: Global rules apply, Apps
                 // rules do not (RuleCompiler.select).
                 //
@@ -147,7 +147,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                 // Deliberately NOT Throwable: an encoder-invariant `check` failing is a bug
                 // in this app, and killing the connection is the right outcome for that.
                 try {
-                    val table = RuleCompiler.compile(Bootstrap.SHORTCUTS, null, ++tableGeneration)
+                    val table =
+                        RuleCompiler.compile(Defaults.CONFIG.shortcuts, null, ++tableGeneration)
                     tables = tables.push(table)
                     helper.pushTable(table)
                 } catch (e: IllegalArgumentException) {
