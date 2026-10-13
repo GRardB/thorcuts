@@ -21,10 +21,20 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // Host tests for the app side of the actions (TaskActions, ActionDispatcher): a plain
+    // JVM, JUnit 5 as in :core. The classes under test import nothing from android.*.
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
+    }
 }
 
 dependencies {
     implementation(project(":core"))
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.20")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

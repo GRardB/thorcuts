@@ -1,11 +1,11 @@
 package com.grardb.thorcuts.platform.tasks
 
-import com.grardb.thorcuts.platform.privilege.PserviceGateway
+import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
 
 /**
  * The app-side face of [TaskTool]. Blocking — call on Privilege.dispatcher.
  */
-class TaskActions(private val gateway: PserviceGateway) {
+class TaskActions(private val gateway: PrivilegeGateway) {
 
     /** Every task with its display and visibility, for diagnostics. */
     fun listTasks(): String =

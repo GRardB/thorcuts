@@ -94,7 +94,7 @@ class PserviceGateway(private val appContext: Context) : PrivilegeGateway {
      *
      * One file per call: two callers sharing a path overwrite each other's script.
      */
-    fun execScript(lines: List<String>): String? {
+    override fun execScript(lines: List<String>): String? {
         val script = File(appContext.cacheDir, "tc_${seq.incrementAndGet()}.sh")
         return try {
             script.writeText(lines.joinToString(separator = "\n", postfix = "\n"))
@@ -124,7 +124,7 @@ class PserviceGateway(private val appContext: Context) : PrivilegeGateway {
      * shell reads, but quoting costs nothing here and keeps className from being
      * a silent exception to the "validate, then quote" rule.
      */
-    fun runEntryPoint(className: String, vararg args: String): String? {
+    override fun runEntryPoint(className: String, vararg args: String): String? {
         if (!CommandSafety.isClassName(className)) {
             Log.w(TAG, "refused an invalid className")
             return null
