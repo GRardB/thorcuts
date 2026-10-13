@@ -48,17 +48,15 @@ static tc_uinput g_vgpio;
 static int       g_sock = -1;
 static volatile sig_atomic_t g_signalled = 0;
 
-/* The rule table the app last pushed. HELD, NOT CONSULTED: matcher.c still runs M1's
-   hardcoded AYN + X rule, and nothing reads this yet. The matcher rewrite — the next
-   piece — replaces that rule with this table. Zero-initialised: an empty table at
-   generation 0, which is also what an app that never pushes gets.
-
-   SWAP POINT: g_table is replaced wholesale, inside the socket branch of the main loop,
-   before that iteration's device branch runs. Single-threaded, so the swap is atomic
-   with respect to any ONE event — but not to a multi-event session: a hold begun under
-   generation N can complete under N+1. The matcher rewrite must give tc_state a
-   generation and decide the session-vs-swap rule the spec schedules. */
+/* The rule table the app last pushed, as parsed. The MATCHER keeps its own copies —
+   the one it matches from, plus a pending one if a push arrived while a session was
+   open — so this is the record of what was accepted, not what is live. handle_table
+   hands it to tc_matcher_set_table right after accepting it, and the "T ok" line says
+   which of the two happened. Replaced wholesale, inside the socket branch of the main
+   loop; the matcher's own swap rule (install at the session's close) is what makes a
+   mid-chord push safe. */
 static tc_table g_table;
+static tc_state g_matcher;
 
 /* Set once the numbering has been DISTURBED — which is NOT the same as "the
    takeover succeeded", and conflating the two was a defect. This flag was
@@ -178,7 +176,9 @@ static void handle_table(const char *line) {
         return;
     }
     g_table = parsed;
-    say("T ok %lu %u", gen, (unsigned)parsed.count);
+    tc_set_result how = tc_matcher_set_table(&g_matcher, &g_table);
+    say("T ok %lu %u %s", gen, (unsigned)parsed.count,
+        how == TC_SET_INSTALLED ? "installed" : "deferred");
 }
 
 static void leave(const char *reason) {
@@ -458,8 +458,7 @@ int main(int argc, char **argv) {
        grab leaves through leave(). */
     say("R %d", (g_pad.fd >= 0 ? 1 : 0) + (g_gpio.fd >= 0 ? 1 : 0));
 
-    tc_state state;
-    tc_init(&state);
+    tc_init(&g_matcher);
 
     int64_t last_ping = now_ms();
     int64_t deadline = -1;
@@ -557,7 +556,7 @@ int main(int argc, char **argv) {
                         (unsigned)ev.code, ev.value);
                 }
 
-                tc_out out = tc_step(&state, ev, now_ms());
+                tc_out out = tc_step(&g_matcher, ev, now_ms());
                 deadline = out.deadline_ms;
                 for (uint8_t k = 0; k < out.n; k++) {
                     apply(out.items[k], &panic, &dirty_pad, &dirty_gpio);
@@ -582,7 +581,7 @@ int main(int argc, char **argv) {
             tick.type = TC_EV_TICK;
             tick.code = 0;
             tick.value = 0;
-            tc_out out = tc_step(&state, tick, now_ms());
+            tc_out out = tc_step(&g_matcher, tick, now_ms());
             deadline = out.deadline_ms;
             bool dirty_pad = false;
             bool dirty_gpio = false;
