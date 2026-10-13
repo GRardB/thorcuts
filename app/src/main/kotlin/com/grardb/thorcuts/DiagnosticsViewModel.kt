@@ -1,6 +1,7 @@
 package com.grardb.thorcuts
 
 import android.app.Application
+import android.content.ComponentName
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,7 +33,8 @@ data class DiagnosticsState(
     val privilege: String = "not probed",
     val idOutput: String = "",
     val taskList: String = "",
-    val lastSwap: String = "",
+    /** The last action's outcome line — a UI-driven swap's or a fired shortcut's. */
+    val lastOutcome: String = "",
     val busy: Boolean = false,
     val helperState: String = "not started",
     /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
@@ -49,7 +51,11 @@ data class DiagnosticsState(
 class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val gateway = PserviceGateway(app)
-    private val tasks = TaskActions(gateway)
+    private val tasks = TaskActions(
+        gateway,
+        // Our own Activity as `am start -n` takes it: what OpenThorcuts launches.
+        ComponentName(app, MainActivity::class.java).flattenToShortString(),
+    )
     private val dispatcher = ActionDispatcher(tasks)
     private val helper = HelperSupervisor(app, gateway, ::onHelperMessage)
 
@@ -124,7 +130,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun swapScreens() = privileged {
         val outcome = tasks.swapScreens()
-        _state.update { it.copy(lastSwap = outcome) }
+        _state.update { it.copy(lastOutcome = outcome) }
     }
 
     fun startHelper() = privileged {
@@ -320,7 +326,7 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
                     val row = "FIRED gen $gen #$index $id -> $outcome"
                     _state.update {
                         it.copy(
-                            lastSwap = "$outcome ($id)",
+                            lastOutcome = "$outcome ($id)",
                             eventLog = (listOf(row) + it.eventLog).take(40),
                         )
                     }

@@ -84,8 +84,8 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
             HorizontalDivider()
 
             Text("Screens", style = MaterialTheme.typography.labelMedium)
-            if (state.lastSwap.isNotBlank()) {
-                Text("Last swap: ${state.lastSwap}", style = MaterialTheme.typography.bodyMedium)
+            if (state.lastOutcome.isNotBlank()) {
+                Text("Last action: ${state.lastOutcome}", style = MaterialTheme.typography.bodyMedium)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
