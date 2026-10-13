@@ -3,7 +3,7 @@ package com.grardb.thorcuts.platform.tasks
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
 
 /**
- * The app-side face of [SwapTool]. Blocking — call on Privilege.dispatcher.
+ * The app-side face of [TaskTool]. Blocking — call on Privilege.dispatcher.
  */
 class TaskActions(private val gateway: PserviceGateway) {
 
@@ -33,6 +33,6 @@ class TaskActions(private val gateway: PserviceGateway) {
     }
 
     private companion object {
-        const val ENTRY = "com.grardb.thorcuts.platform.tasks.SwapTool"
+        const val ENTRY = "com.grardb.thorcuts.platform.tasks.TaskTool"
     }
 }

@@ -9,23 +9,35 @@ import android.os.IBinder
  * A root shell can run `am`, but `am` exposes no command for
  * IActivityTaskManager.moveRootTaskToDisplay — the call that reparents a LIVE task
  * to another display without relaunching it, so the app keeps running and keeps its
- * state. This makes that binder call directly.
+ * state — nor for removeTask, nor for asking which display holds focus. This makes
+ * those binder calls directly.
  *
  * Because this is not an app process, ART's hidden-API enforcement does not apply
  * and the reflected framework calls resolve freely, exactly as the `am` binary's do.
  *
  * Invoked as:
  *   CLASSPATH=<apk> app_process /system/bin \
- *       com.grardb.thorcuts.platform.tasks.SwapTool list
- *   CLASSPATH=<apk> app_process /system/bin \
- *       com.grardb.thorcuts.platform.tasks.SwapTool swap <displayA> <displayB>
+ *       com.grardb.thorcuts.platform.tasks.TaskTool list
+ *   … TaskTool swap <displayA> <displayB>
+ *   … TaskTool focused
+ *   … TaskTool close <display|focused>
+ *   … TaskTool move <display|focused> <displayA> <displayB>
+ *
+ * A <display> is an int; `focused` names the display of the window manager's focused
+ * root task, resolved here and nowhere else (see [resolveDisplay]).
  *
  * Contract with the caller: the first line matching ^(OK|ERR) is the result.
  * Everything goes to stdout, because the pservice bridge returns stdout only.
  */
-object SwapTool {
+object TaskTool {
 
     private const val MAX_TASKS = 200
+
+    /** The screen argument that means "wherever input focus is": see [resolveDisplay]. */
+    private const val FOCUSED = "focused"
+
+    private const val USAGE = "usage: list | swap <displayA> <displayB> | focused | " +
+        "close <display|focused> | move <display|focused> <displayA> <displayB>"
 
     /**
      * `WindowConfiguration.ACTIVITY_TYPE_HOME` — @hide, so written out.
@@ -60,7 +72,21 @@ object SwapTool {
                     if (a == null || b == null) fail(2, "usage: swap <displayA> <displayB>")
                     else swap(atm, a, b)
                 }
-                else -> fail(2, "usage: list | swap <displayA> <displayB>")
+                "focused" -> focused(atm)
+                "close" -> {
+                    val screen = args.getOrNull(1) ?: fail(2, "usage: close <display|focused>")
+                    close(atm, screen)
+                }
+                "move" -> {
+                    val screen = args.getOrNull(1)
+                    val a = args.getOrNull(2)?.toIntOrNull()
+                    val b = args.getOrNull(3)?.toIntOrNull()
+                    if (screen == null || a == null || b == null) {
+                        fail(2, "usage: move <display|focused> <displayA> <displayB>")
+                    }
+                    move(atm, screen, a, b)
+                }
+                else -> fail(2, USAGE)
             }
         } catch (t: Throwable) {
             // Throwable, not Exception: reflection raises linkage errors too.
@@ -83,11 +109,18 @@ object SwapTool {
                     " type=${activityTypeOf(it)} pkg=${packageOf(it)}"
             )
         }
+        // The focused root task, so a FOCUSED decision can be checked from one `list`:
+        // close/move/open on FOCUSED act on THIS display (resolveDisplay).
+        val focused = focusedRootTask(atm)
+        println(
+            if (focused == null) "F none"
+            else "F ${focused.taskId} display=${displayOf(focused)} pkg=${packageOf(focused)}"
+        )
         val roots = rootTasks(atm)
         roots.forEach {
             // type= is the topmost LEAF's activity type, kept because it is useful
             // when reading this output by eye. rootType= and mode= are the ROOT
-            // task's OWN values — the two swappable() actually decides on, and the
+            // task's OWN values — the two isApp() actually decides on, and the
             // two the server tests. They are printed so a wrong decision can be
             // diagnosed from one `list` without a second tool.
             println(
@@ -103,14 +136,14 @@ object SwapTool {
         // printed `OK visible ` (trailing space, empty list) while two tasks were
         // plainly on screen. Say what it means instead, as fail(4) and the
         // one-sided ok() already do.
-        val summary = roots.filter { swappable(it) }
+        val summary = roots.filter { isApp(it) }
             .joinToString(";") { "${it.taskId}@${displayOf(it)}=${packageOf(it)}" }
         ok(if (summary.isEmpty()) "swappable none" else "swappable $summary")
     }
 
     /**
-     * Six distinct, honestly-reported outcomes. "A visible task" below means a
-     * SWAPPABLE one — see [swappable]: the launcher and a picture-in-picture
+     * Six distinct, honestly-reported outcomes. "A visible task" below means an
+     * APP task — see [isApp]: the launcher and a picture-in-picture
      * window are both visible, and neither is something this tool may send
      * anywhere, so a screen showing only those counts as empty.
      *  - both displays have a visible task and both moves succeed -> OK "swapped …"
@@ -140,15 +173,14 @@ object SwapTool {
 
         // An app can own several root tasks, and the enumeration walks display by
         // display, so "the first task for this package" can be a hidden one on the
-        // wrong screen. Take the topmost SWAPPABLE root task on each display.
-        val onA = tasks.firstOrNull { displayOf(it) == displayA && swappable(it) }
-        val onB = tasks.firstOrNull { displayOf(it) == displayB && swappable(it) }
+        // wrong screen. Take the app task on each display: the topmost one [isApp].
+        val onA = appOn(tasks, displayA)
+        val onB = appOn(tasks, displayB)
         if (onA == null && onB == null) {
             return fail(4, "no app to swap on display $displayA or $displayB")
         }
 
-        val move = atm.javaClass.methods.firstOrNull { it.name == "moveRootTaskToDisplay" }
-            ?: return fail(6, "moveRootTaskToDisplay not found; candidates=" + signatures(atm, "Display"))
+        val move = moveRootTaskMethod(atm)
 
         // Task ids were captured before either move, so the second call is unaffected
         // by the first.
@@ -202,6 +234,95 @@ object SwapTool {
             return fail(9, "nothing moved; task ${task.taskId}@$from -> $to failed: ${chain(t)}")
         }
         ok("moved ${task.taskId}@$from -> $to; display $to had no app to send back")
+    }
+
+    /** Which display holds input focus, and what is focused there. */
+    private fun focused(atm: Any) {
+        val f = focusedRootTask(atm) ?: fail(10, "no focused root task")
+        ok("focused display=${displayOf(f)} task=${f.taskId} pkg=${packageOf(f)}")
+    }
+
+    /**
+     * The display a `<display|focused>` argument names.
+     *
+     * `focused` is the display of the window manager's focused root task — the display
+     * whose window the gamepad's events reach. Resolved HERE, in the tool, because the
+     * app side has no path to the hidden API; and resolved to a DISPLAY, not to the
+     * focused task itself: the app on that display is then chosen by [isApp] from the
+     * full root list exactly as [swap] chooses, so a focused picture-in-picture window
+     * or a focused launcher yields the display's app task or "no app", never the PiP
+     * window or the home stack. A ROM reporting no focused root task is an ERR, not a
+     * default display: there is no right screen to act on.
+     */
+    private fun resolveDisplay(atm: Any, screen: String): Int {
+        if (screen == FOCUSED) {
+            val f = focusedRootTask(atm) ?: fail(10, "no focused root task")
+            return displayOf(f)
+        }
+        return screen.toIntOrNull()
+            ?: fail(2, "screen must be a display id or '$FOCUSED', was '$screen'")
+    }
+
+    /** The app on [display]: the topmost root task there that [isApp], or null. */
+    private fun appOn(roots: List<android.app.TaskInfo>, display: Int): android.app.TaskInfo? =
+        roots.firstOrNull { displayOf(it) == display && isApp(it) }
+
+    /** `moveRootTaskToDisplay(rootTaskId, displayId)` by name; absent -> ERR naming candidates. */
+    private fun moveRootTaskMethod(atm: Any): java.lang.reflect.Method =
+        atm.javaClass.methods.firstOrNull { it.name == "moveRootTaskToDisplay" }
+            ?: fail(6, "moveRootTaskToDisplay not found; candidates=" + signatures(atm, "Display"))
+
+    /**
+     * Close the app on a screen: `removeTask` on its root task.
+     *
+     * `removeTask` also kills the app's process when every activity it had lived in
+     * that task and it holds no foreground service (M1 measured this on the recents
+     * swipe-away path). That is what "close" means for a game — and it is why closing
+     * Thorcuts' OWN task stops the helper (by watchdog) until the app is reopened; an
+     * owner decision, recorded in the actions spec. The vacated screen is refilled by
+     * its SECONDARY_HOME within seconds (M1), so the line says `closed`, not "blank".
+     */
+    private fun close(atm: Any, screen: String) {
+        val display = resolveDisplay(atm, screen)
+        val task = appOn(rootTasks(atm), display)
+            ?: fail(11, "no app to close on display $display")
+        val remove = atm.javaClass.methods
+            .firstOrNull { it.name == "removeTask" && it.parameterCount == 1 }
+            ?: fail(6, "removeTask not found; candidates=" + signatures(atm, "remove"))
+        val removed = remove.invoke(atm, task.taskId) as? Boolean
+            ?: fail(12, "removeTask(${task.taskId}) did not return a boolean")
+        if (!removed) fail(13, "removeTask(${task.taskId}) returned false")
+        ok("closed ${task.taskId}@$display ${packageOf(task)}")
+    }
+
+    /**
+     * Send the app on a screen to the other screen — the swap's call, one-sided and
+     * UNCONDITIONAL. Unlike [swap]'s one-sided branch this does not care whether the
+     * destination already shows an app: the task lands ON TOP of it (the binder call
+     * reparents on top), and the line names what it covered, read from the root list
+     * captured before the move. Nothing is moved back; the swap exists for that.
+     */
+    private fun move(atm: Any, screen: String, displayA: Int, displayB: Int) {
+        val from = resolveDisplay(atm, screen)
+        val to = when (from) {
+            displayA -> displayB
+            displayB -> displayA
+            else -> fail(14, "display $from is neither $displayA nor $displayB")
+        }
+        val roots = rootTasks(atm)
+        val task = appOn(roots, from) ?: fail(15, "no app to move on display $from")
+        val covered = appOn(roots, to)
+        val move = moveRootTaskMethod(atm)
+        try {
+            move.invoke(atm, task.taskId, to)
+        } catch (t: Throwable) {
+            // Nothing has moved: a one-sided move either happens or it doesn't.
+            fail(16, "nothing moved; task ${task.taskId}@$from -> $to failed: ${chain(t)}")
+        }
+        ok(
+            "moved ${task.taskId}@$from -> $to" +
+                if (covered != null) " over ${covered.taskId}@$to" else "; display $to had no app"
+        )
     }
 
     private fun activityTaskManager(): Any? {
@@ -269,18 +390,46 @@ object SwapTool {
             ?: throw NoSuchMethodException(
                 "getAllRootTaskInfos not found; candidates=" + signatures(atm, "RootTask")
             )
-        val args = m.parameterTypes.map<Class<*>, Any?> { t ->
+        return usableList(
+            m.invoke(atm, *everythingArgs(m)),
+            "getAllRootTaskInfos",
+            android.app.TaskInfo::class.java,
+        )
+    }
+
+    /**
+     * Arguments meaning "everything" for a parameterless-on-this-ROM query that another
+     * ROM may have given a display or user filter: an int is -1, a boolean false.
+     */
+    private fun everythingArgs(m: java.lang.reflect.Method): Array<Any?> =
+        m.parameterTypes.map<Class<*>, Any?> { t ->
             when {
                 t == Int::class.javaPrimitiveType -> -1
                 t == Boolean::class.javaPrimitiveType -> false
                 else -> null
             }
         }.toTypedArray()
-        return usableList(
-            m.invoke(atm, *args),
-            "getAllRootTaskInfos",
-            android.app.TaskInfo::class.java,
-        )
+
+    /**
+     * The window manager's focused root task — `getFocusedRootTaskInfo()`, resolved by
+     * NAME with [everythingArgs] like [rootTasks] (no arguments on this ROM, API 33).
+     * Null when the ROM reports none. The element is an `ActivityTaskManager.RootTaskInfo`
+     * — a `TaskInfo`, so [displayOf] and [packageOf] read it — and a return of any other
+     * type throws and names it rather than being cast blind.
+     *
+     * UNVERIFIED on this ROM until the actions device run; `getAllRootTaskInfos` (the
+     * same AIDL, the same ROM) resolved exactly this way.
+     */
+    private fun focusedRootTask(atm: Any): android.app.TaskInfo? {
+        val m = atm.javaClass.methods.firstOrNull { it.name == "getFocusedRootTaskInfo" }
+            ?: throw NoSuchMethodException(
+                "getFocusedRootTaskInfo not found; candidates=" + signatures(atm, "Focused")
+            )
+        val raw = m.invoke(atm, *everythingArgs(m)) ?: return null
+        return raw as? android.app.TaskInfo
+            ?: throw IllegalStateException(
+                "getFocusedRootTaskInfo returned ${raw.javaClass.name}, not a TaskInfo"
+            )
     }
 
     /**
@@ -301,8 +450,8 @@ object SwapTool {
      *
      * A partly-usable list throws rather than being filtered down, because the
      * elements this tool cannot see are exactly the ones that make a swap unsafe:
-     * [swap] picks the FIRST swappable task per display out of a z-ordered list,
-     * and [swappable] exists to exclude the home and pinned tasks whose reparent
+     * [swap] picks the FIRST app task per display out of a z-ordered list,
+     * and [isApp] exists to exclude the home and pinned tasks whose reparent
      * is destructive. Silently dropping an element could hide one of those and
      * promote the wrong task to "topmost".
      *
@@ -378,7 +527,7 @@ object SwapTool {
      * `info.topActivityType = top.getActivityType()`).
      *
      * DIAGNOSTIC ONLY — printed by [list], never decided on. The server's
-     * TaskDisplayArea checks tested by [swappable] look at the ROOT task's own
+     * TaskDisplayArea checks tested by [isApp] look at the ROOT task's own
      * type and windowing mode, which are different values; see
      * [ownActivityTypeOf] / [ownWindowingModeOf].
      */
@@ -399,7 +548,7 @@ object SwapTool {
      *
      * Like every other read in this file, an absent field throws and names what
      * was missing. A silent default here would be worse than elsewhere: see
-     * [swappable].
+     * [isApp].
      */
     private fun windowConfigurationOf(t: android.app.TaskInfo): Any {
         val configuration = taskInfoField("configuration").get(t)
@@ -464,7 +613,13 @@ object SwapTool {
         windowConfigInt(windowConfigurationOf(t), "getWindowingMode")
 
     /**
-     * Is this root task one a swap may move at all?
+     * Is this root task "the app on a screen"?
+     *
+     * The topmost visible root task that is neither a home task nor pinned — the one a
+     * swap may move, a close may remove and a move may send across, for the same
+     * measured reason in each case: a rejected reparent is destructive, and a PiP
+     * window z-orders to the top. Written for the swap first (the paragraphs below
+     * are that record) and reused unchanged by [close] and [move].
      *
      * Visible, not the launcher, and not a picture-in-picture window. Both
      * exclusions are not style choices — WindowManager refuses those moves, and
@@ -525,11 +680,11 @@ object SwapTool {
      * are two constants, not one, despite both being 2: see [WINDOWING_MODE_PINNED].
      *
      * No `runCatching{}.getOrDefault(…)` anywhere in this chain, deliberately. A
-     * [swappable] that answered `true` because a field was missing would hand an
+     * [isApp] that answered `true` because a field was missing would hand an
      * arbitrary pair of tasks to a reparent that destroys what it rejects, and
      * report success.
      */
-    private fun swappable(t: android.app.TaskInfo): Boolean =
+    private fun isApp(t: android.app.TaskInfo): Boolean =
         visibleOf(t) &&
             ownActivityTypeOf(t) != ACTIVITY_TYPE_HOME &&
             ownWindowingModeOf(t) != WINDOWING_MODE_PINNED
@@ -560,12 +715,14 @@ object SwapTool {
         return sb.toString().replace('\n', ' ').replace('\r', ' ')
     }
 
-    private fun ok(message: String) {
+    // ok() and fail() return Nothing: the process ends inside them, so a caller may
+    // write `x ?: fail(…)` and the compiler knows no value is needed after it.
+    private fun ok(message: String): Nothing {
         println("OK $message")
         halt(0)
     }
 
-    private fun fail(code: Int, reason: String) {
+    private fun fail(code: Int, reason: String): Nothing {
         // stdout, not stderr: the pservice bridge returns stdout only.
         println("ERR $reason")
         halt(code)
@@ -575,9 +732,10 @@ object SwapTool {
      * halt(), not System.exit(): a bare app_process VM has live binder threads and
      * shutdown hooks can hang the process instead of ending it.
      */
-    private fun halt(code: Int) {
+    private fun halt(code: Int): Nothing {
         System.out.flush()
         System.err.flush()
         Runtime.getRuntime().halt(code)
+        throw AssertionError("Runtime.halt($code) returned")
     }
 }
