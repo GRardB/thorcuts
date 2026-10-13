@@ -275,12 +275,17 @@ object TaskTool {
     /**
      * Close the app on a screen: `removeTask` on its root task.
      *
-     * `removeTask` also kills the app's process when every activity it had lived in
-     * that task and it holds no foreground service (M1 measured this on the recents
-     * swipe-away path). That is what "close" means for a game — and it is why closing
-     * Thorcuts' OWN task stops the helper (by watchdog) until the app is reopened; an
-     * owner decision, recorded in the actions spec. The vacated screen is refilled by
-     * its SECONDARY_HOME within seconds (M1), so the line says `closed`, not "blank".
+     * What becomes of the app's PROCESS depends on the state of its activities, and
+     * both cases are MEASURED: a STOPPED app's task removed (M1, the recents swipe-away
+     * path) kills the process when every activity it had lived in that task and it holds
+     * no foreground service; the FOREGROUND app's task removed (the actions run,
+     * 2026-10-13, on Thorcuts itself) finishes the activity and leaves the process alive
+     * as a cached, empty one — AMS skips the kill while any activity in the process is
+     * not yet stopped. So closing Thorcuts' OWN task does not stop the helper: it keeps
+     * working, with no UI, until the system reclaims the cached process (an undefined
+     * lifetime; owner decision, recorded in the actions spec). The vacated screen is
+     * refilled by its SECONDARY_HOME within seconds (M1), so the line says `closed`, not
+     * "blank".
      */
     private fun close(atm: Any, screen: String) {
         val display = resolveDisplay(atm, screen)
@@ -616,10 +621,16 @@ object TaskTool {
      * Is this root task "the app on a screen"?
      *
      * The topmost visible root task that is neither a home task nor pinned — the one a
-     * swap may move, a close may remove and a move may send across, for the same
-     * measured reason in each case: a rejected reparent is destructive, and a PiP
-     * window z-orders to the top. Written for the swap first (the paragraphs below
-     * are that record) and reused unchanged by [close] and [move].
+     * swap may move, a close may remove and a move may send across. For swap and move
+     * the exclusions are forced: a rejected reparent is destructive (below). For close
+     * they are a choice: `removeTask` would happily remove a launcher, and a screen with
+     * no launcher is a screen with nothing on it. The predicate keys on the root task's
+     * own activity TYPE, so a launcher relaunched as an ordinary task (parent spec §9's
+     * known edge; Cocoon was measured in that state on the bottom screen, 2026-10-13)
+     * passes it — the swap moves it, and close would remove it. Refusing the resolved
+     * HOME / SECONDARY_HOME packages belongs with the app side, which can ask
+     * PackageManager; carried. Written for the swap first (the paragraphs below are that
+     * record) and reused unchanged by [close] and [move].
      *
      * Visible, not the launcher, and not a picture-in-picture window. Both
      * exclusions are not style choices — WindowManager refuses those moves, and

@@ -160,6 +160,23 @@ class TaskActionsTest {
     }
 
     @Test
+    fun `an empty tool reply is an ERR line, never an empty outcome`() {
+        // app_process died before printing (Appendix B's stale-CLASSPATH "Aborted" with exit
+        // 0): the gateway's grep matched nothing, so the reply is "" rather than null.
+        val noLine = "ERR the tool printed no result line"
+        assertEquals(noLine, actions(FakeGateway("")).listTasks())
+        assertEquals(noLine, actions(FakeGateway(" ")).closeScreen(ScreenTarget.TOP))
+        val g = FakeGateway("")
+        assertEquals(noLine, actions(g).openThorcuts(ScreenTarget.FOCUSED))
+        assertEquals(listOf(entryPoint("focused")), g.calls)   // and am never ran
+    }
+
+    @Test
+    fun `the entry point names the tool class`() {
+        assertEquals(TaskTool::class.java.name, tool)
+    }
+
+    @Test
     fun `every script line is one physical line`() {
         val g = FakeGateway("", "", "x", "x")
         val a = actions(g)

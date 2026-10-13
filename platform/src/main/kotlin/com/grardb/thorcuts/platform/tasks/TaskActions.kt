@@ -82,8 +82,14 @@ class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
         return if ("Error" in out) "ERR am: $out" else "OK display $display: $out"
     }
 
-    private fun tool(vararg args: String): String =
-        gateway.runEntryPoint(ENTRY, *args) ?: NO_REPLY
+    private fun tool(vararg args: String): String {
+        val line = gateway.runEntryPoint(ENTRY, *args) ?: return NO_REPLY
+        // app_process can die before it prints — a stale CLASSPATH ends in a bare "Aborted"
+        // with exit 0 (parent spec, Appendix B) — and the gateway's grep then matches
+        // nothing, so the reply is "" rather than null. That is not a result line and must
+        // never become an empty outcome.
+        return line.ifBlank { NO_LINE }
+    }
 
     /** One shell line through the script path: stderr folded in, line breaks to spaces. */
     private fun shell(command: String): String? =
@@ -98,6 +104,7 @@ class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
     private companion object {
         const val ENTRY = "com.grardb.thorcuts.platform.tasks.TaskTool"
         const val NO_REPLY = "ERR no reply from pservice"
+        const val NO_LINE = "ERR the tool printed no result line"
 
         /** The tool's word for "the display that holds input focus". */
         const val FOCUSED = "focused"
