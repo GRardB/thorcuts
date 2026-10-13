@@ -218,7 +218,7 @@ static void apply(tc_decision d, bool *out_panic, bool *out_dirty_pad, bool *out
             /* Emit nothing: this is the whole point. The app under us never sees it. */
             break;
         case TC_FIRE:
-            say("F %u", (unsigned)d.rule_id);
+            say("F %u %u", (unsigned)d.generation, (unsigned)d.index);
             break;
         case TC_PANIC:
             *out_panic = true;

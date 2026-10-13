@@ -1,11 +1,31 @@
 #ifndef THORCUTS_MATCHER_H
 #define THORCUTS_MATCHER_H
 
+/*
+ * The matcher: parent spec §6 over the installed rule table.
+ *
+ * Every event is classified (down / up / repeat / axis edge). A SESSION opens on the
+ * first down of a modifier the table uses, and each event inside it is decided by
+ * comparing the held modifiers and the swallowed buttons against the rules: a PRESS
+ * rule fires on the down that completes it, a HOLD rule arms a deadline, a bare PRESS
+ * fires on the modifier's release, and when no rule can match any more the whole
+ * session is handed to the game (pass-through) so a modifier's normal job survives.
+ * The invariant every decision serves: a down's fate decides its up's fate.
+ *
+ * Pure: no syscalls, no allocation, no time of its own. main.c feeds events and
+ * TC_EV_TICKs and emits the decisions. Host-tested in test/test_matcher.c.
+ *
+ * The table is this matcher's INPUT, which is why this header includes ruletable.h
+ * and not the other way round.
+ */
+
+#include "ruletable.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Logical device slots. M1 grabs exactly these two, and no others: every
-   modifier lives on one of them and every bindable button is on the pad. */
+/* Logical device slots. The helper grabs exactly these two: every modifier lives on
+   one of them and every bindable button is on the pad. Equal to TC_RT_DEV_*. */
 enum {
     TC_DEV_PAD   = 0,  /* the AYN gamepad: face, shoulders, sticks, D-pad, Home, Back */
     TC_DEV_GPIO  = 1,  /* "gpio-keys": the AYN button, and Volume + */
@@ -20,23 +40,23 @@ enum {
 /* Synthetic type fed by main.c when a deadline is reached. Never from a device. */
 #define TC_EV_TICK 0xF0
 
-/* Control codes. These MUST match docs/superpowers/findings/…-m1-device-recon.md.
-   If Task 1 measured something different, change these. */
+/* The panic combo's keys, used by track_panic only. The table-driven paths use
+   tc_modifier_controls; test_ruletable.c pins these three to it. */
 #define TC_CODE_AYN    194  /* KEY_F24,    on TC_DEV_GPIO */
-#define TC_CODE_X      307  /* BTN_NORTH,  on TC_DEV_PAD  */
 #define TC_CODE_HOME   102  /* KEY_HOME,   on TC_DEV_PAD  */
 #define TC_CODE_SELECT 314  /* BTN_SELECT, on TC_DEV_PAD  */
-
-/* M1's single hardcoded rule: hold AYN + X. */
-#define TC_RULE_SWAP_SCREENS 1
-#define TC_HOLD_MS 400
 
 /* The panic combo: Home + Select held this long releases every device and exits.
    Deliberately NOT Home + Back 5s, which is another Thor app's panic combo — a
    user may have both installed. */
 #define TC_PANIC_MS 4000
 
-#define TC_MAX_DECISIONS 8
+/* Bounds. A pass-through emits at most 5 modifier downs + TC_MAX_PRESSED button
+   downs, plus the event itself and a tap's second half: 16 holds the worst case,
+   and test_matcher.c provokes it. */
+#define TC_MAX_DECISIONS 16
+#define TC_MAX_PRESSED   8
+#define TC_MAX_AXES      (TC_MAX_RULES * TC_MAX_BUTTONS)
 
 typedef struct {
     uint8_t  dev;    /* TC_DEV_* */
@@ -49,14 +69,15 @@ typedef enum {
     TC_FORWARD = 0,  /* emit .ev on this device's virtual twin, unchanged */
     TC_SWALLOW,      /* emit nothing: the app under us never sees it */
     TC_SYNTH,        /* emit .ev: a press withheld earlier and released now */
-    TC_FIRE,         /* .rule_id matched; tell the app */
+    TC_FIRE,         /* rule .index of the table at .generation matched; tell the app */
     TC_PANIC         /* release every device and exit */
 } tc_kind;
 
 typedef struct {
     tc_kind  kind;
-    tc_event ev;       /* meaningful for TC_FORWARD and TC_SYNTH */
-    uint16_t rule_id;  /* meaningful for TC_FIRE */
+    tc_event ev;          /* meaningful for TC_FORWARD and TC_SYNTH */
+    uint32_t generation;  /* meaningful for TC_FIRE: the INSTALLED table's */
+    uint16_t index;       /* meaningful for TC_FIRE: the rule's index in it */
 } tc_decision;
 
 typedef struct {
@@ -66,19 +87,59 @@ typedef struct {
     int64_t     deadline_ms;
 } tc_out;
 
+/* A button whose DOWN was swallowed and which is still physically down. `synthed`
+   means the game has since been handed that down (a pass-through), so its up must
+   be forwarded rather than swallowed. */
 typedef struct {
-    bool    ayn_held;
-    bool    ayn_emitted;       /* AYN-down already handed down: session passed through */
-    bool    x_swallowed;       /* X is physically down, its down event withheld */
-    bool    fired;             /* the rule fired during this AYN session */
-    int64_t hold_deadline_ms;  /* -1 = none */
+    tc_control ctl;
+    bool       synthed;
+} tc_pressed;
 
+/* A bound axis control and whether its threshold is currently crossed. Tracked
+   always; consulted only inside a session. */
+typedef struct {
+    tc_control ctl;
+    bool       pressed;
+} tc_axis;
+
+typedef struct {
+    /* The table. `table` is matched from; `pending` waits for the session to close. */
+    tc_table   table;
+    tc_table   pending;
+    bool       has_pending;
+    uint8_t    mods;              /* M: OR of every installed rule's modifiers */
+    tc_axis    axes[TC_MAX_AXES]; /* every distinct ABS button in the table */
+    int        naxes;
+
+    /* The session. Open from the first modifier down until no modifier is held and
+       no swallowed button is still down. */
+    bool       session;
+    uint8_t    held;              /* modifiers physically down, bit = TC_MOD_* */
+    uint8_t    synthed;           /* modifiers whose down the game has been handed */
+    tc_pressed pressed[TC_MAX_PRESSED];
+    int        npressed;
+    bool       fired;             /* at least one rule fired this session */
+    bool       passed;            /* the session was handed to the game */
+    int        armed;             /* rule index with a pending HOLD deadline, or -1 */
+    int64_t    hold_deadline_ms;  /* -1 = none */
+
+    /* The panic combo, tracked from raw events whatever the table says. */
     bool    home_held;
     bool    select_held;
-    int64_t panic_deadline_ms; /* -1 = none */
+    int64_t panic_deadline_ms;    /* -1 = none */
 } tc_state;
 
-void   tc_init(tc_state *s);
+typedef enum {
+    TC_SET_INSTALLED = 0,  /* matching from it now */
+    TC_SET_DEFERRED        /* a session is open; installed at its close */
+} tc_set_result;
+
+/* Start with an EMPTY table: nothing is a modifier, every event is forwarded. */
+void tc_init(tc_state *s);
+
+/* Install t, or defer it if a session is open. Copies; t need not outlive the call. */
+tc_set_result tc_matcher_set_table(tc_state *s, const tc_table *t);
+
 tc_out tc_step(tc_state *s, tc_event ev, int64_t now_ms);
 
 #endif /* THORCUTS_MATCHER_H */
