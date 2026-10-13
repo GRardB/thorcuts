@@ -9,7 +9,9 @@ interface ConfigFile {
     /** The file's text, or null when there is no file. Throws on an I/O failure. */
     fun read(): String?
 
-    /** Replace atomically: a reader sees the old text or the new, never a torn one. */
+    /** Replace atomically: a reader sees the old text or the new, never a torn one. Throws
+     *  [java.io.IOException], and only that, on any failure: the store maps it to a rejected
+     *  write, so an implementation wraps whatever else its file system throws. */
     fun write(text: String)
 
     /** Move an unreadable file out of the way without deleting it. Where it went, or null

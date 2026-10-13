@@ -26,15 +26,26 @@ class AndroidConfigFile(context: Context) : ConfigFile {
     }
 
     override fun write(text: String) {
-        val out = atomic.startWrite()
+        val out = try {
+            atomic.startWrite()
+        } catch (t: Throwable) {
+            throw t.asIOException()
+        }
         try {
             out.write(text.toByteArray(Charsets.UTF_8))
             atomic.finishWrite(out)
         } catch (t: Throwable) {
             atomic.failWrite(out)
-            throw t
+            throw t.asIOException()
         }
     }
+
+    /** [ConfigFile.write]'s contract is IOException and only that; AtomicFile can also throw
+     *  a SecurityException or an IllegalStateException, which the store would not catch and
+     *  which would then escape `update()` into its caller. Wrapped here, once, so the store's
+     *  one catch is the whole story. */
+    private fun Throwable.asIOException(): IOException =
+        this as? IOException ?: IOException("could not write $NAME: $this", this)
 
     override fun setAside(): String? {
         if (!file.exists()) return null

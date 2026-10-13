@@ -72,6 +72,11 @@ class ConfigStore(
      *  with its socket, so nothing retained can fire again. */
     private var tables = RetainedTables()
 
+    /** The generations a failed compile consumed: reported as [Event.PushFailed], nothing sent.
+     *  An ack naming one is a fault, not a pruned-but-real table — see [tableAccepted]. Grows
+     *  only on a failed compile: the over-limit loaded file today, a per-app recompile in M4. */
+    private val unsent = mutableSetOf<Int>()
+
     /** True between [helperReady] and [helperGone]: a write pushes only while this holds. */
     private var helperLive = false
 
@@ -118,8 +123,14 @@ class ConfigStore(
      * unusable file aside (never overwrites it) and writes the default in its place. A file
      * that loads with some shortcuts dropped is NOT rewritten: the dropped entries stay on
      * disk, with the warning on screen, until the user's next write.
+     *
+     * Idempotent: a second call reads nothing, writes nothing and reports nothing, so "once"
+     * is a property of the store and not of its caller. If a helper is already live when the
+     * load completes, the loaded config is pushed at the next generation — the helper got the
+     * empty placeholder from [helperReady] and must not keep matching from it.
      */
     suspend fun load(): Unit = withContext(dispatcher) {
+        if (loaded) return@withContext
         val read = runCatching { file.read() }
         val text = read.getOrNull()
         val decoded: DecodeResult? = when {
@@ -163,6 +174,7 @@ class ConfigStore(
             }
         }
         loaded = true
+        if (helperLive) pushCurrent()
     }
 
     /**
@@ -202,24 +214,35 @@ class ConfigStore(
     fun helperReady() {
         scope.launch {
             helperLive = true
-            val next = generation + 1
-            val table = try {
-                RuleCompiler.compile(_config.value.shortcuts, null, next)
-            } catch (e: IllegalArgumentException) {
-                generation = next
-                onEvent(Event.PushFailed(next, e.message ?: "does not compile"))
-                return@launch
-            }
-            offer(table)
+            pushCurrent()
         }
     }
 
+    /** The current config compiled at the next generation and offered; a config that does
+     *  not compile consumes the generation and is reported as [Event.PushFailed]. Shared by
+     *  [helperReady] and the end of [load]. On the store's thread. */
+    private fun pushCurrent() {
+        val next = generation + 1
+        val table = try {
+            RuleCompiler.compile(_config.value.shortcuts, null, next)
+        } catch (e: IllegalArgumentException) {
+            generation = next
+            unsent += next
+            onEvent(Event.PushFailed(next, e.message ?: "does not compile"))
+            return
+        }
+        offer(table)
+    }
+
     /** `T ok <gen> … installed|deferred`. An `installed` ack proves nothing older can fire
-     *  again, so it prunes; `deferred` prunes nothing. An ack for a generation never pushed
-     *  is reported and otherwise ignored. */
+     *  again, so it prunes; `deferred` prunes nothing. An ack names a generation never pushed
+     *  — a helper or supervisor fault, reported — when it is ABOVE the counter, or when a
+     *  failed compile consumed it ([unsent]). Any other ack is real even when its table is no
+     *  longer retained (pruned by a newer `installed`, or by the retention cap): it is already
+     *  superseded, so it changes nothing and says nothing. */
     fun tableAccepted(generation: Int, installed: Boolean) {
         scope.launch {
-            if (tables.tables.none { it.generation == generation }) {
+            if (generation > this@ConfigStore.generation || generation in unsent) {
                 onEvent(Event.UnexpectedAck(generation))
                 return@launch
             }

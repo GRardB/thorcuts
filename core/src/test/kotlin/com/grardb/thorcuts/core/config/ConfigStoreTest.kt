@@ -58,6 +58,29 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun `a second load reads nothing, writes nothing and reports nothing`() {
+        val s = store()
+        runBlocking { s.load() }
+        file.text = null                       // as if the file had vanished: a naive reload
+        runBlocking { s.load() }               // would write the default a second time
+        assertEquals(1, file.writes.size)
+        assertEquals(1, events.size)
+        assertEquals(Defaults.CONFIG, s.config.value)
+    }
+
+    @Test
+    fun `a default that cannot be written is reported with the reason`() {
+        file.writeFailure = IOException("ENOSPC")
+        val s = store()
+        runBlocking { s.load() }
+        val loaded = only<Event.Loaded>()
+        assertFalse(loaded.created)
+        assertEquals("could not write the default: ENOSPC", loaded.failure)
+        assertEquals(Defaults.CONFIG, s.config.value)   // memory is published either way
+        assertTrue(file.writes.isEmpty())
+    }
+
+    @Test
     fun `a readable file loads without writing`() {
         file.text = configFixture("kitchen-sink.json")
         val s = store()
@@ -281,6 +304,37 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun `an ack for a table the retention cap dropped is real and changes nothing`() {
+        val s = store()
+        runBlocking { s.load() }
+        repeat(9) { s.helperReady() }          // gens 1..9; the cap keeps 2..9
+        s.tableAccepted(1, installed = true)   // pushed once, dropped since: not a fault
+        assertTrue(events.none { it is Event.UnexpectedAck })
+        s.fired(2, 0)
+        assertIs<FireResolution.Hit>(only<Event.Fire>().resolution)   // nothing pruned
+        events.clear()
+        s.tableAccepted(10, installed = true)  // above the counter: never pushed
+        assertEquals(Event.UnexpectedAck(10), only<Event.UnexpectedAck>())
+    }
+
+    @Test
+    fun `an ack for a generation a failed compile consumed is unexpected`() {
+        file.text = ConfigCodec.encode(many(65))
+        val s = store()
+        runBlocking { s.load() }
+        s.helperReady()                                   // gen 1 consumed, nothing sent
+        assertEquals(1, only<Event.PushFailed>().generation)
+        s.tableAccepted(1, installed = true)              // at the counter, never pushed
+        assertEquals(Event.UnexpectedAck(1), only<Event.UnexpectedAck>())
+        events.clear()
+        runBlocking { s.update { c -> ThorcutsConfig(c.shortcuts.take(64)) } }   // gen 2 sent
+        s.tableAccepted(1, installed = true)              // below the counter now: still a fault
+        assertEquals(Event.UnexpectedAck(1), only<Event.UnexpectedAck>())
+        s.fired(2, 0)
+        assertIs<FireResolution.Hit>(only<Event.Fire>().resolution)
+    }
+
+    @Test
     fun `a fire resolves to a hit, out of range, or stale`() {
         val s = store()
         runBlocking { s.load() }
@@ -296,6 +350,20 @@ class ConfigStoreTest {
         events.clear()
         s.fired(9, 0)
         assertEquals(FireResolution.Stale(9), only<Event.Fire>().resolution)
+    }
+
+    @Test
+    fun `a helper live before the load gets the loaded config pushed next`() {
+        val s = store()
+        s.helperReady()                                  // before load: the empty placeholder
+        assertEquals(listOf(0), pushed.map { it.ruleCount })
+        runBlocking { s.load() }
+        assertEquals(listOf(1, 2), pushedGens())         // the file's config follows at once
+        assertEquals(listOf(0, 1), pushed.map { it.ruleCount })
+        assertEquals(
+            listOf("TablePushed", "Loaded", "TablePushed"),
+            events.map { it::class.simpleName },
+        )
     }
 
     @Test
