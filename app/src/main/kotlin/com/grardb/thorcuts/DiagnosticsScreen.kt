@@ -118,6 +118,27 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
                     Text("Stop helper")
                 }
             }
+
+            HorizontalDivider()
+
+            Text("Config", style = MaterialTheme.typography.labelMedium)
+            Text(state.configState, style = MaterialTheme.typography.bodyMedium)
+            // The one write surface until M3's editor: a real write through the config
+            // store, so the device run can watch write -> recompile -> push -> ack. Not a
+            // privileged call, so not gated on `busy`. Deleted with the rest of this screen.
+            OutlinedButton(
+                onClick = vm::toggleSwap,
+                enabled = state.swapEnabled != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when (state.swapEnabled) {
+                        true -> "Swap shortcut: ON — tap to disable"
+                        false -> "Swap shortcut: OFF — tap to enable"
+                        null -> "Swap shortcut: not in config"
+                    }
+                )
+            }
         }
 
         HorizontalDivider()
