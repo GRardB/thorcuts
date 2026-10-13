@@ -64,6 +64,18 @@ class ConfigCodecTest {
     }
 
     @Test
+    fun `the actions run fixture decodes to its model with nothing dropped`() {
+        val r = ok(configFixture("actions-run.json"))
+        assertEquals(ACTIONS_RUN, r.config)
+        assertTrue(r.dropped.isEmpty())
+    }
+
+    @Test
+    fun `the actions run fixture is the encoder's own output`() {
+        assertEquals(configFixture("actions-run.json"), ConfigCodec.encode(ACTIONS_RUN))
+    }
+
+    @Test
     fun `encode then decode is the identity`() {
         for (c in listOf(KITCHEN_SINK, Defaults.CONFIG, ThorcutsConfig(emptyList()))) {
             val back = ConfigCodec.decode(ConfigCodec.encode(c))

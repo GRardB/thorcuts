@@ -28,6 +28,34 @@ internal const val RETROARCH = "com.retroarch.aarch64"
 
 internal fun padKey(code: Int) = Control(Device.PAD, EvdevType.KEY, code, 1)
 
+/** A PRESS shortcut on AYN + one button, enabled, global: the actions run's shape. */
+private fun press(id: String, button: Control, action: Action) =
+    Shortcut(id, Trigger(setOf(ModifierKey.AYN), setOf(button)), action)
+
+/**
+ * What fixtures/config/actions-run.json means: the actions device run's input. Every
+ * trigger is AYN + one button (the swap keeps its HOLD); every action kind, and every
+ * screen target that run exercises. The actions spec's table is the source; this is it
+ * as code, and the file is this value as the encoder writes it.
+ */
+internal val ACTIONS_RUN = ThorcutsConfig(
+    shortcuts = listOf(
+        Defaults.SWAP_SCREENS,
+        press("close-focused", padKey(304), Action.CloseScreen(ScreenTarget.FOCUSED)),
+        press("close-top", padKey(310), Action.CloseScreen(ScreenTarget.TOP)),
+        press("close-bottom", padKey(311), Action.CloseScreen(ScreenTarget.BOTTOM)),
+        press("home-focused", padKey(305), Action.GoHome(ScreenTarget.FOCUSED)),
+        press("home-bottom", padKey(318), Action.GoHome(ScreenTarget.BOTTOM)),
+        press("open-bottom", padKey(308), Action.OpenThorcuts(ScreenTarget.BOTTOM)),
+        press("open-top", padKey(317), Action.OpenThorcuts(ScreenTarget.TOP)),
+        press(
+            "move-focused",
+            Control(Device.PAD, EvdevType.ABS, 17, -1),   // D-pad up
+            Action.MoveFocusedToOtherScreen,
+        ),
+    ),
+)
+
 /**
  * What fixtures/config/kitchen-sink.json means. Every action kind and screen target, both
  * scopes, a bare modifier, four buttons, an ABS control at −1, two modifiers, a disabled

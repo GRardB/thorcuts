@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "shortcuts": [
+    {
+      "id": "swap-screens",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 307,
+            "value": 1
+          }
+        ],
+        "style": "HOLD",
+        "holdMs": 400
+      },
+      "action": {
+        "kind": "SwapScreens"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "close-focused",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 304,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "CloseScreen",
+        "screen": "FOCUSED"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "close-top",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 310,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "CloseScreen",
+        "screen": "TOP"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "close-bottom",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 311,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "CloseScreen",
+        "screen": "BOTTOM"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "home-focused",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 305,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "GoHome",
+        "screen": "FOCUSED"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "home-bottom",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 318,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "GoHome",
+        "screen": "BOTTOM"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "open-bottom",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 308,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "OpenThorcuts",
+        "screen": "BOTTOM"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "open-top",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 317,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "OpenThorcuts",
+        "screen": "TOP"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    },
+    {
+      "id": "move-focused",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "ABS",
+            "code": 17,
+            "value": -1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "MoveFocusedToOtherScreen"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    }
+  ]
+}
