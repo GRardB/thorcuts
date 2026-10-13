@@ -1,0 +1,61 @@
+{
+  "shortcuts": [
+    {
+      "scope": {
+        "kind": "Apps",
+        "included": ["org.dolphinemu.dolphinemu", "com.retroarch.aarch64"]
+      },
+      "action": { "screen": "FOCUSED", "kind": "CloseScreen" },
+      "trigger": {
+        "style": "PRESS",
+        "buttons": [
+          { "value": -1, "code": 16, "type": "ABS", "device": "PAD" },
+          { "device": "GPIO", "type": "KEY", "code": 115, "value": 1 }
+        ],
+        "modifiers": ["SELECT", "START"]
+      },
+      "enabled": false,
+      "id": "close-in-emulators",
+      "note": "an unknown shortcut member"
+    },
+    {
+      "id": "home-hold",
+      "trigger": { "modifiers": ["HOME"], "style": "HOLD", "holdMs": 500 },
+      "action": { "kind": "GoHome", "screen": "TOP" }
+    },
+    {
+      "id": "four-buttons",
+      "trigger": {
+        "modifiers": ["AYN"],
+        "buttons": [
+          { "device": "PAD", "type": "KEY", "code": 311, "value": 1 },
+          { "device": "PAD", "type": "KEY", "code": 304, "value": 1 },
+          { "device": "PAD", "type": "KEY", "code": 310, "value": 1 },
+          { "device": "PAD", "type": "KEY", "code": 305, "value": 1 }
+        ],
+        "style": "PRESS"
+      },
+      "action": { "kind": "MoveFocusedToOtherScreen" },
+      "scope": { "kind": "Global", "excluded": ["com.retroarch.aarch64"] }
+    },
+    {
+      "id": "open-bottom",
+      "trigger": { "modifiers": ["BACK"], "style": "PRESS" },
+      "action": { "kind": "OpenThorcuts", "screen": "BOTTOM" },
+      "enabled": true,
+      "scope": { "kind": "Global" }
+    },
+    {
+      "id": "swap",
+      "trigger": {
+        "modifiers": ["AYN"],
+        "buttons": [ { "device": "PAD", "type": "KEY", "code": 307, "value": 1 } ],
+        "style": "HOLD",
+        "holdMs": 400
+      },
+      "action": { "kind": "SwapScreens" }
+    }
+  ],
+  "theme": { "dark": true },
+  "schemaVersion": 1
+}
