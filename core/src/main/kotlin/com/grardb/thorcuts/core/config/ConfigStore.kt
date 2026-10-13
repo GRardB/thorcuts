@@ -5,6 +5,7 @@ import com.grardb.thorcuts.core.rules.FireResolution
 import com.grardb.thorcuts.core.rules.RetainedTables
 import com.grardb.thorcuts.core.rules.RuleCompiler
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -40,7 +41,21 @@ class ConfigStore(
     private val default: ThorcutsConfig = Defaults.CONFIG,
     private val dispatcher: CoroutineDispatcher = singleThread(),
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    /**
+     * A throw inside one of the four launched bodies — a throwing [onEvent] handler, or the
+     * compiler's own `check` escaping [helperReady]'s narrower catch — is reported as
+     * [Event.Failed] instead of reaching the thread's uncaught handler, which on Android takes
+     * the process and the helper channel with it (the same reasoning as Privilege.scope). The
+     * push itself is guarded separately, in [offer], so that [update]'s caller is covered too.
+     * The ViewModel path this replaced sat inside the supervisor's catch(Throwable) and lost
+     * one connection; this loses nothing and says so. The one thing it cannot survive is an
+     * [onEvent] that throws on [Event.Failed] as well: the handler's own report then throws,
+     * and that is a bug in the app's handler, not a state this store can reach on its own.
+     */
+    private val scope = CoroutineScope(
+        SupervisorJob() + dispatcher +
+            CoroutineExceptionHandler { _, t -> onEvent(Event.Failed(t)) }
+    )
 
     private val _config = MutableStateFlow(ThorcutsConfig(emptyList()))
 
@@ -87,6 +102,10 @@ class ConfigStore(
         data class UnexpectedAck(val generation: Int) : Event
 
         data class Fire(val resolution: FireResolution) : Event
+
+        /** Something threw where nothing should: a launched body, or the push itself. Reported,
+         *  never swallowed, never fatal. The store's state is consistent up to the throw. */
+        data class Failed(val error: Throwable) : Event
     }
 
     sealed interface UpdateOutcome {
@@ -227,11 +246,18 @@ class ConfigStore(
     }
 
     /** Retain, push, say so. The generation is consumed here, and by [helperReady]'s
-     *  failed-compile branch — those two places and no other. */
+     *  failed-compile branch — those two places and no other. A push that throws (a `require`
+     *  in the supervisor's command) is [Event.Failed], from [update]'s caller thread as much as
+     *  from a launched body; the table stays retained, as a push that was sent would. */
     private fun offer(table: CompiledTable) {
         generation = table.generation
         tables = tables.push(table)
-        push(table)
+        try {
+            push(table)
+        } catch (e: RuntimeException) {
+            onEvent(Event.Failed(e))
+            return
+        }
         onEvent(Event.TablePushed(table))
     }
 

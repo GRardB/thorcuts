@@ -285,6 +285,13 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
             is ConfigStore.Event.UnexpectedAck ->
                 Log.w(TAG, "TABLE_ACK gen=${event.generation} matches no pushed table")
             is ConfigStore.Event.Fire -> onFire(event.resolution)
+            is ConfigStore.Event.Failed -> {
+                // Where the process used to die (or, before the store, one connection was
+                // lost): reported with the trace, and a row the owner can see.
+                Log.e(TAG, "CONFIG_FAILURE", event.error)
+                val row = "CONFIG FAILURE: ${event.error}"
+                _state.update { it.copy(eventLog = (listOf(row) + it.eventLog).take(40)) }
+            }
         }
     }
 

@@ -323,6 +323,47 @@ class ConfigStoreTest {
         assertEquals(ConfigCodec.encode(custom), file.text)
     }
 
+    // ── failures are reported, never fatal ────────────────────────────────────────────
+
+    @Test
+    fun `a push that throws is reported as Failed and the store stays usable`() {
+        val s = ConfigStore(
+            file, push = { throw IllegalStateException("boom") }, onEvent = events::add,
+            dispatcher = Dispatchers.Unconfined,
+        )
+        runBlocking { s.load() }
+        s.helperReady()
+        assertEquals("boom", only<Event.Failed>().error.message)
+        assertTrue(events.none { it is Event.TablePushed })
+        // The table was retained before the push threw, as a sent one would be.
+        s.fired(1, 0)
+        assertIs<FireResolution.Hit>(only<Event.Fire>().resolution)
+        // The same from update's caller thread: Applied, plus a Failed, no throw.
+        events.clear()
+        assertIs<UpdateOutcome.Applied>(runBlocking { s.update(swapOff) })
+        assertEquals("boom", only<Event.Failed>().error.message)
+    }
+
+    @Test
+    fun `a throwing event handler inside a launched body is reported, not fatal`() {
+        val s = ConfigStore(
+            file, pushed::add,
+            onEvent = { e ->
+                events += e
+                if (e is Event.TablePushed) throw IllegalStateException("handler boom")
+            },
+            dispatcher = Dispatchers.Unconfined,
+        )
+        runBlocking { s.load() }
+        s.helperReady()
+        assertEquals(
+            listOf("Loaded", "TablePushed", "Failed"),
+            events.map { it::class.simpleName },
+        )
+        assertEquals("handler boom", only<Event.Failed>().error.message)
+        assertEquals(listOf(1), pushedGens())
+    }
+
     // ── the real dispatcher ───────────────────────────────────────────────────────────
 
     @Test
