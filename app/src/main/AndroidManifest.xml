@@ -32,8 +32,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Thorcuts">
 
+        <!-- Excluded from recents: on this ROM a swipe-away is launcher3's forceStopPackage
+             (MEASURED 2026-10-14), which kills the helper and withholds the boot start until
+             the next open. The launcher icon and the notification are the ways back. -->
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:label="@string/app_name">
             <intent-filter>

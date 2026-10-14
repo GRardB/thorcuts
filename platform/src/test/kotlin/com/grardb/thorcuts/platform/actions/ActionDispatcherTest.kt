@@ -18,7 +18,7 @@ class ActionDispatcherTest {
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
 
     private fun dispatcher(g: FakeGateway) =
-        ActionDispatcher(TaskActions(g, "com.grardb.thorcuts/.MainActivity") { emptySet() })
+        ActionDispatcher(TaskActions(g, "com.grardb.thorcuts/.MainActivity") { setOf("c.home") })
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 
@@ -49,7 +49,7 @@ class ActionDispatcherTest {
             "OK closed 7@4 com.android.settings",
             dispatcher(g).dispatch(Action.CloseScreen(ScreenTarget.BOTTOM)),
         )
-        assertEquals(listOf(entryPoint("close", "4")), g.calls)
+        assertEquals(listOf(entryPoint("close", "4", "c.home")), g.calls)
     }
 
     @Test

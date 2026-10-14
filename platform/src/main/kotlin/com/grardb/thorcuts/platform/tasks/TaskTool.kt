@@ -53,6 +53,23 @@ object TaskTool {
     private const val ACTIVITY_TYPE_HOME = 2
 
     /**
+     * `WindowConfiguration.ACTIVITY_TYPE_RECENTS`, `_ASSISTANT` and `_DREAM` — @hide, so
+     * written out (WindowConfiguration.java:148-152). A root task of any of these types is
+     * no app either: MEASURED 2026-10-14, launcher3's RecentsActivity (type=recents) was
+     * display 0's only visible task after Cocoon's home there had been destroyed, and the
+     * swap moved it to the other screen — twice.
+     */
+    private const val ACTIVITY_TYPE_RECENTS = 3
+    private const val ACTIVITY_TYPE_ASSISTANT = 4
+    private const val ACTIVITY_TYPE_DREAM = 5
+
+    /** The root-task activity types [isApp] refuses: the launcher, and the system's own
+     *  surfaces (recents, assistant, dream), none of which is "the app on a screen". */
+    private val NOT_AN_APP = setOf(
+        ACTIVITY_TYPE_HOME, ACTIVITY_TYPE_RECENTS, ACTIVITY_TYPE_ASSISTANT, ACTIVITY_TYPE_DREAM,
+    )
+
+    /**
      * `WindowConfiguration.WINDOWING_MODE_PINNED` — @hide, so written out.
      *
      * One of the WINDOWING_MODE_* enum. Compared ONLY against a windowing mode.
@@ -290,8 +307,9 @@ object TaskTool {
      * the swap's.
      *
      * What becomes of the app's PROCESS depends on the state of its activities, and
-     * both cases are MEASURED: a STOPPED app's task removed (M1, the recents swipe-away
-     * path) kills the process when every activity it had lived in that task and it holds
+     * both cases are MEASURED: a STOPPED app's task removed (M1, `am stack remove` of a
+     * backgrounded app — a recents swipe-away on this ROM is a force-stop instead, measured
+     * 2026-10-14) kills the process when every activity it had lived in that task and it holds
      * no foreground service; the FOREGROUND app's task removed (the actions run,
      * 2026-10-13, on Thorcuts itself) finishes the activity and leaves the process alive
      * — AMS skips the kill while any activity in the process is not yet stopped, and
@@ -647,17 +665,17 @@ object TaskTool {
     /**
      * Is this root task "the app on a screen"?
      *
-     * The topmost visible root task that is neither a home task nor pinned — the one a
-     * swap may move, a close may remove and a move may send across. For swap and move
-     * the exclusions are forced: a rejected reparent is destructive (below). For close
-     * they are a choice: `removeTask` would happily remove a launcher, and a screen with
-     * no launcher is a screen with nothing on it. The predicate keys on the root task's
-     * own activity TYPE, so a launcher relaunched as an ordinary task (parent spec §9's
-     * known edge; Cocoon was measured in that state on the bottom screen, 2026-10-13)
-     * passes it — the swap moves it, and [close] refuses it by name: the app side resolves
-     * the HOME / SECONDARY_HOME packages with PackageManager and passes them in. Written
-     * for the swap first (the paragraphs below are that record) and reused unchanged by
-     * [close] and [move].
+     * The topmost visible root task that is neither a home, recents, assistant or dream task
+     * ([NOT_AN_APP]) nor pinned — the one a swap may move, a close may remove and a move may
+     * send across. For swap and move the exclusions are forced: a rejected reparent is
+     * destructive (below). For close they are a choice: `removeTask` would happily remove a
+     * launcher, and a screen with no launcher is a screen with nothing on it. The predicate
+     * keys on the root task's own activity TYPE, so a launcher relaunched as an ordinary task
+     * (parent spec §9's known edge; Cocoon was measured in that state on the bottom screen,
+     * 2026-10-13) passes it — the swap moves it, and [close] refuses it by name: the app side
+     * resolves the HOME / SECONDARY_HOME packages with PackageManager and passes them in.
+     * Written for the swap first (the paragraphs below are that record) and reused unchanged
+     * by [close] and [move].
      *
      * Visible, not the launcher, and not a picture-in-picture window. Both
      * exclusions are not style choices — WindowManager refuses those moves, and
@@ -711,11 +729,12 @@ object TaskTool {
      * caught neither case. `Task.java:3419-3420` populates the task's own values
      * separately, into `configuration.windowConfiguration`, and those are what
      * the server's `isActivityTypeHome()` / `getWindowingMode()` return. So the
-     * predicate below is exactly the server's pair of checks, read at exactly the
-     * server's level.
+     * predicate below reads exactly the server's two values at exactly the server's
+     * level — the activity type against [NOT_AN_APP] (the server's home check, widened
+     * to the system's other surfaces), the windowing mode against pinned.
      *
-     * Both constants are @hide, so both values are written out above — and they
-     * are two constants, not one, despite both being 2: see [WINDOWING_MODE_PINNED].
+     * Every constant is @hide, so every value is written out above — and HOME and
+     * PINNED are two constants, not one, despite both being 2: see [WINDOWING_MODE_PINNED].
      *
      * No `runCatching{}.getOrDefault(…)` anywhere in this chain, deliberately. A
      * [isApp] that answered `true` because a field was missing would hand an
@@ -724,7 +743,7 @@ object TaskTool {
      */
     private fun isApp(t: android.app.TaskInfo): Boolean =
         visibleOf(t) &&
-            ownActivityTypeOf(t) != ACTIVITY_TYPE_HOME &&
+            ownActivityTypeOf(t) !in NOT_AN_APP &&
             ownWindowingModeOf(t) != WINDOWING_MODE_PINNED
 
     private fun packageOf(t: android.app.TaskInfo): String =

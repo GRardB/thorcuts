@@ -100,7 +100,10 @@ class ThorcutsCoordinator(
     private val switch: EnabledSwitch,
     /**
      * Hold (true) or release (false) the process. Idempotent on both sides; a release is
-     * never issued while a stop owns the transition (its `finally` releases).
+     * never issued while a stop owns the transition (its `finally` releases). MUST NOT
+     * THROW: a hold runs before the start body's `finally` and a release before the stop's
+     * `transition = null`, so a throw would latch the transition for the life of the process
+     * and every later call would be ignored. The app's keeper catches every RuntimeException.
      */
     private val keeper: (Boolean) -> Unit,
     /** Thorcuts' own Activity as `am start -n` takes it; see [TaskActions]. */
@@ -155,11 +158,13 @@ class ThorcutsCoordinator(
     private class Decision(val verdict: Verdict, val seen: CoordinatorState, val epoch: Int)
 
     /**
-     * Persist the switch and act on it. From any thread; returns at once. Ignored, with a
-     * log line, while a start or stop is in flight: the button is disabled on the transition,
-     * and no other caller may overlap one either. The write lands on the privileged thread,
-     * never the caller's, and being queued first on that single thread it precedes the start
-     * or stop queued after it.
+     * Persist the switch and act on it. Returns at once. Call it on the MAIN thread, as every
+     * caller does today: the hold ([keeper] true) runs on the caller's thread, and the keeper's
+     * flag is safe only while every hold is issued on main (HelperService.live says why).
+     * Ignored, with a log line, while a start or stop is in flight: the button is disabled on
+     * the transition, and no other caller may overlap one either. The write lands on the
+     * privileged thread, never the caller's, and being queued first on that single thread it
+     * precedes the start or stop queued after it.
      */
     fun setEnabled(on: Boolean) {
         val decision = if (on) decideStart(switchOn = true) else decideStop()
@@ -188,6 +193,7 @@ class ThorcutsCoordinator(
      * Start the helper if the switch is on and nothing runs; otherwise nothing. Idempotent,
      * and the one entry for every process start: the Activity's ViewModel, the boot
      * receiver, and the service's onStartCommand after a sticky restart. Returns at once.
+     * On the MAIN thread, for the reason [setEnabled] gives.
      */
     fun ensureRunning() {
         val d = decideStart(switchOn = false)

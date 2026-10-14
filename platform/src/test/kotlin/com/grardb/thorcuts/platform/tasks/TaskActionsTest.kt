@@ -21,7 +21,8 @@ class TaskActionsTest {
     private fun script(command: String): Call =
         Call.Script(listOf("$command 2>&1 | tr '\\n' ' '"))
 
-    private fun actions(g: FakeGateway, launchers: Set<String> = emptySet()) =
+    /** One launcher by default: with none resolved, close refuses before it reaches the tool. */
+    private fun actions(g: FakeGateway, launchers: Set<String> = setOf("c.launcher")) =
         TaskActions(g, main) { launchers }
 
     // ── the tool's subcommands ────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ class TaskActionsTest {
         for ((screen, arg) in cases) {
             val g = FakeGateway("OK closed 12@$arg com.example")
             assertEquals("OK closed 12@$arg com.example", actions(g).closeScreen(screen))
-            assertEquals(listOf(entryPoint("close", arg)), g.calls)
+            assertEquals(listOf(entryPoint("close", arg, "c.launcher")), g.calls)
         }
     }
 
@@ -95,6 +96,16 @@ class TaskActionsTest {
         val line = a.closeScreen(ScreenTarget.BOTTOM)
         assertTrue(line.startsWith("ERR launchers: "), line)
         assertTrue(g.calls.isEmpty())                  // nothing reached the tool
+    }
+
+    @Test
+    fun `closeScreen refuses when no launcher resolved, and nothing reaches the tool`() {
+        // Every device has a HOME handler, so an empty resolution means the query failed —
+        // and a close with no names would remove a launcher that happened to be the app.
+        val g = FakeGateway()
+        val a = TaskActions(g, main) { emptySet() }
+        assertEquals("ERR launchers: none resolved; not closing", a.closeScreen(ScreenTarget.TOP))
+        assertTrue(g.calls.isEmpty())
     }
 
     @Test

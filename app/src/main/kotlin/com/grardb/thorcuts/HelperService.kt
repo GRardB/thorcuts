@@ -14,8 +14,11 @@ import android.util.Log
 /**
  * The keep-alive: a foreground service that exists exactly while the switch is on, so the
  * process — and with it the helper, the store and the log the coordinator holds — survives
- * the Activity being closed, its task removed, a swipe from recents, and a system that would
- * otherwise reclaim a cached process. It holds nothing itself; the coordinator does.
+ * the Activity being closed, its task removed, and a system that would otherwise reclaim a
+ * cached process. NOT a swipe from recents: on this ROM that is launcher3's forceStopPackage
+ * (MEASURED 2026-10-14), which nothing survives and which puts the app in the stopped state,
+ * so MainActivity is excluded from recents; the next open is the recovery from any force-stop.
+ * It holds nothing itself; the coordinator does.
  *
  * Started and stopped by the coordinator's keeper ([ThorcutsApp] maps it here). START_STICKY,
  * so a process the system killed comes back with the service, whose onStartCommand asks the
@@ -60,7 +63,17 @@ class HelperService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A null intent is the system restarting a sticky service after a kill.
         Log.i(TAG, "SERVICE_START sticky=${intent == null}")
-        ThorcutsApp.of(this).coordinator.ensureRunning()
+        val coordinator = ThorcutsApp.of(this).coordinator
+        coordinator.ensureRunning()
+        // A sticky restart landing after the switch was persisted OFF (a kill inside the stop
+        // window) would otherwise hold the process under "Thorcuts is on" with no helper.
+        // `enabled` is set before any hold, so the normal start never reads it false here.
+        if (!coordinator.state.value.enabled) {
+            Log.i(TAG, "SERVICE_STOP switch off")
+            // Through stop(): `live` is cleared BEFORE the stop is issued, as the flag's
+            // contract says, so a hold landing before onDestroy is not dropped as a no-op.
+            stop(this)
+        }
         return START_STICKY
     }
 
@@ -83,6 +96,13 @@ class HelperService : Service() {
          * is then a no-op rather than a second startForegroundService — which, issued from
          * the service's own onStartCommand on a sticky restart, would re-deliver
          * onStartCommand to the service itself.
+         *
+         * INVARIANT: every hold is issued on the main thread — the Activity's ViewModel, the
+         * boot receiver, this service's onStartCommand — and only a release may come from
+         * another thread. That ordering is what makes the flag safe: a hold from another
+         * thread could land between a service's onCreate and its pending onDestroy and be
+         * dropped as a no-op, leaving the process unheld with the coordinator believing
+         * otherwise.
          */
         @Volatile private var live = false
 

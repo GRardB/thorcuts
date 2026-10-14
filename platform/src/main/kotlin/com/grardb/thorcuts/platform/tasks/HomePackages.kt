@@ -15,6 +15,11 @@ import com.grardb.thorcuts.core.safety.CommandSafety
  * built from it is deterministic; filtered, so nothing that is not a package name reaches a
  * root shell even here — PackageManager is trusted, the rule is not conditional.
  *
+ * A match whose filter priority is below zero is NOT a launcher: that is AOSP's convention
+ * for a fallback home — `com.android.settings.FallbackHome` answers MAIN + HOME at -1000 as
+ * the stand-in for the first seconds of boot, and MEASURED on the Thor (2026-10-14) it made
+ * `close` refuse to close Settings. A real launcher declares HOME at 0 or above.
+ *
  * `queryIntentActivities(Intent, Int)` is deprecated from API 33 in favour of the
  * `ResolveInfoFlags` form, which does not exist below 33; minSdk is 30, so the old form is
  * the one that runs everywhere, suppressed rather than branched.
@@ -27,6 +32,7 @@ object HomePackages {
             .flatMap { category ->
                 pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(category), 0)
             }
+            .filter { it.priority >= 0 }
             .map { it.activityInfo.packageName }
             .filter { CommandSafety.isPackage(it) }
             .toSortedSet()

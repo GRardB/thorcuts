@@ -49,8 +49,10 @@ class TaskActions(
      * rule here as well as in `HomePackages`, because what reaches a root shell is validated
      * at the boundary that reaches it, unconditionally; sorted, so the command is
      * deterministic; the gateway quotes them like every argument. A resolver that throws —
-     * it is a binder call — is answered as a line, and nothing is closed: an empty set would
-     * be the silent default this class forbids, since every device has a HOME handler.
+     * it is a binder call — or a set that is EMPTY once filtered (every device has a HOME
+     * handler, so empty means the query failed, or the names were not packages) is answered
+     * as a line, and nothing is closed: passing no names would be the silent default this
+     * class forbids.
      */
     fun closeScreen(screen: ScreenTarget): String {
         val launchers = try {
@@ -59,6 +61,7 @@ class TaskActions(
             return "ERR launchers: $e"
         }
         val args = launchers.filter { CommandSafety.isPackage(it) }.sorted()
+        if (args.isEmpty()) return "ERR launchers: none resolved; not closing"
         return tool("close", screenArg(screen), *args.toTypedArray())
     }
 
