@@ -17,13 +17,14 @@ import java.io.OutputStream
 
 /**
  * Owns the app's side of the helper channel: hosts the socket, launches the
- * helper as uid 0, pings it, and reads what it says.
+ * helper as uid 0, pings it, and reads what it says. The [HelperChannel] the
+ * coordinator holds; built once per process.
  */
 class HelperSupervisor(
     private val appContext: Context,
     private val gateway: PserviceGateway,
     private val onMessage: (HelperMessage) -> Unit,
-) {
+) : HelperChannel {
 
     @Volatile var connected: Boolean = false
         private set
@@ -33,9 +34,15 @@ class HelperSupervisor(
     @Volatile private var server: LocalServerSocket? = null
     @Volatile private var out: OutputStream? = null
 
-    /** Bind the socket, then launch the helper. Call on Privilege.dispatcher. */
-    fun start() {
-        if (running) return
+    /**
+     * Bind the socket, then launch the helper. Call on Privilege.dispatcher. NOT_BOUND only
+     * when the socket could not be bound (a launch that fails says so as a message);
+     * ALREADY_RUNNING when a session is already up, which the coordinator treats as no
+     * start at all — the terminal message of a dying session reaches it before this flag
+     * resets, so "already running" can mean "still winding down".
+     */
+    override fun start(): HelperChannel.Start {
+        if (running) return HelperChannel.Start.ALREADY_RUNNING
         running = true
         stopRequested = false
 
@@ -89,7 +96,7 @@ class HelperSupervisor(
         } catch (t: Throwable) {
             Log.w(TAG, "bind $SOCKET failed: ${t.message}")
             running = false
-            return
+            return HelperChannel.Start.NOT_BOUND
         }
         server = ss
 
@@ -97,6 +104,7 @@ class HelperSupervisor(
         Thread(::pingLoop, "thorcuts-helper-ping").apply { isDaemon = true }.start()
 
         launch()
+        return HelperChannel.Start.STARTED
     }
 
     /**
@@ -111,10 +119,9 @@ class HelperSupervisor(
      * but the send is skipped on the normal path, where the helper disconnects in
      * well under a second and its own restore has already put the pad back.
      *
-     * Call on Privilege.dispatcher, as DiagnosticsViewModel already does through
-     * privileged{}.
+     * Call on Privilege.dispatcher, as the coordinator does.
      */
-    fun stop() {
+    override fun stop() {
         // Nothing to stop. Without this an idle supervisor still assessed the pad
         // and could run a full 3 s restore cycle — blinking out a controller this
         // object has never touched — on nothing more than a stray Stop tap.
@@ -222,7 +229,7 @@ class HelperSupervisor(
      * The supervisor owns the channel, not the policy: WHAT to push and WHEN to
      * recompile is the caller's.
      */
-    fun pushTable(table: CompiledTable) {
+    override fun pushTable(table: CompiledTable) {
         Log.i(TAG, "TABLE_PUSH gen=${table.generation} rules=${table.ruleCount} " +
             "bytes=${table.bytes.size}")
         send(HelperCommand.PushTable(table.generation, table.hex))
