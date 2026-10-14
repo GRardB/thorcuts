@@ -40,7 +40,7 @@
     },
     {
       "id": "open-bottom",
-      "trigger": { "modifiers": ["BACK"], "style": "PRESS" },
+      "trigger": { "modifiers": ["SELECT"], "style": "PRESS" },
       "action": { "kind": "OpenThorcuts", "screen": "BOTTOM" },
       "enabled": true,
       "scope": { "kind": "Global" }

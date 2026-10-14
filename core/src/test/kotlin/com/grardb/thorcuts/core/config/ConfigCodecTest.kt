@@ -183,6 +183,17 @@ class ConfigCodecTest {
     )
 
     @Test
+    fun `a bare Home tap is dropped and the rest of the file loads`() {
+        val homeTap = """{"id":"home-tap","trigger":{"modifiers":["HOME"],"style":"PRESS"},""" +
+            """"action":{"kind":"GoHome","screen":"TOP"}}"""
+        val r = ok(file(swap, homeTap))
+        assertEquals(listOf("swap"), r.config.shortcuts.map { it.id })
+        val d = r.dropped.single()
+        assertEquals(Dropped(1, "home-tap", d.reason), d)
+        assertTrue("tap HOME alone" in d.reason && "go home" in d.reason, d.reason)
+    }
+
+    @Test
     fun `an Apps scope with no packages is dropped`() = assertDrops(
         listOf(
             swap.dropLast(1) + ""","scope":{"kind":"Apps","included":[]}}"""

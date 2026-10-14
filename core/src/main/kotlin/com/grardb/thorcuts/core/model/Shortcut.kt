@@ -8,7 +8,9 @@ enum class TriggerStyle(val wire: Int) { PRESS(0), HOLD(1) }
  * (parent spec §6). A bare modifier — no buttons — is valid: `tap AYN`, `hold AYN 500ms`.
  *
  * Every invariant the rule table's parser enforces is enforced here first, so a
- * Trigger that exists is one the helper will accept.
+ * Trigger that exists is one the helper will accept. What the APP refuses — a bare tap on
+ * Home or Back — is [Shortcut]'s rule, not this type's: the format's fixtures encode every
+ * bare modifier, and nothing reaches the helper except through a shortcut.
  */
 data class Trigger(
     val modifiers: Set<ModifierKey>,
@@ -66,6 +68,17 @@ sealed interface Scope {
     }
 }
 
+/**
+ * One rule here is the app's, not the wire's: a bare PRESS on Home alone or on Back alone
+ * cannot be a shortcut. It would fire on the release instead of synthesising the tap, so the
+ * system would never see that button again wherever the shortcut applies — the user stranded
+ * by accident (conflict-detector spec, Rule 1). A timed bare Home still goes home on a quick
+ * tap, and Home with a button or with another modifier leaves a lone Home intact; those bind.
+ * The rule is enforced on the shortcut and not on [Trigger] because a trigger is the wire's
+ * unit (the format's fixtures encode each bare modifier) and nothing reaches the helper
+ * except through a shortcut — the codec's read, the editor's save and the store's `update`
+ * all build one.
+ */
 data class Shortcut(
     val id: String,
     val trigger: Trigger,
@@ -73,5 +86,19 @@ data class Shortcut(
     val scope: Scope = Scope.Global(),
     val enabled: Boolean = true,
 ) {
-    init { require(id.isNotBlank()) { "a shortcut needs an id" } }
+    init {
+        require(id.isNotBlank()) { "a shortcut needs an id" }
+        val t = trigger
+        if (t.style == TriggerStyle.PRESS && t.buttons.isEmpty() && t.modifiers.size == 1) {
+            val only = t.modifiers.single()
+            require(only !in NAVIGATION) {
+                "tap ${only.name} alone is not bindable: it would no longer ${NAVIGATION[only]}"
+            }
+        }
+    }
+
+    private companion object {
+        /** The modifiers whose bare tap must keep its job, and what that job is. */
+        val NAVIGATION = mapOf(ModifierKey.HOME to "go home", ModifierKey.BACK to "go back")
+    }
 }

@@ -108,7 +108,7 @@
       "enabled": true,
       "trigger": {
         "modifiers": [
-          "BACK"
+          "SELECT"
         ],
         "buttons": [],
         "style": "PRESS"

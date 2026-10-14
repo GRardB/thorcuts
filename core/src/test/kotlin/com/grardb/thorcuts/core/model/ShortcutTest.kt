@@ -76,6 +76,32 @@ class ShortcutTest {
         assertTrue(s.enabled)
     }
 
+    /** Binds [t] to an action: Rule 1 is the shortcut's, so a trigger alone never refuses. */
+    private fun bound(t: Trigger) = Shortcut("s", t, Action.GoHome(ScreenTarget.TOP))
+
+    @Test
+    fun `tap Home alone cannot be a shortcut`() {
+        val tap = Trigger(setOf(ModifierKey.HOME))          // the trigger itself is fine
+        val e = assertFailsWith<IllegalArgumentException> { bound(tap) }
+        assertTrue("HOME" in e.message!! && "go home" in e.message!!, e.message)
+    }
+
+    @Test
+    fun `tap Back alone cannot be a shortcut`() {
+        val tap = Trigger(setOf(ModifierKey.BACK))
+        val e = assertFailsWith<IllegalArgumentException> { bound(tap) }
+        assertTrue("BACK" in e.message!! && "go back" in e.message!!, e.message)
+    }
+
+    @Test
+    fun `Home with a button, another modifier or a timer, and bare Start or Select, all bind`() {
+        bound(Trigger(setOf(ModifierKey.HOME), setOf(key(304))))
+        bound(Trigger(setOf(ModifierKey.HOME, ModifierKey.BACK)))
+        bound(Trigger(setOf(ModifierKey.HOME), style = TriggerStyle.HOLD, holdMs = 500))
+        bound(Trigger(setOf(ModifierKey.START)))
+        bound(Trigger(setOf(ModifierKey.SELECT)))
+    }
+
     @Test
     fun `an action can aim at the focused screen, resolved when it runs`() {
         val close = Action.CloseScreen(ScreenTarget.FOCUSED)

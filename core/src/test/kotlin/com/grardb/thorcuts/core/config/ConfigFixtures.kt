@@ -92,7 +92,7 @@ internal val KITCHEN_SINK = ThorcutsConfig(
         ),
         Shortcut(
             id = "open-bottom",
-            trigger = Trigger(setOf(ModifierKey.BACK)),
+            trigger = Trigger(setOf(ModifierKey.SELECT)),
             action = Action.OpenThorcuts(ScreenTarget.BOTTOM),
         ),
         Shortcut(
