@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# TaskTool is the app_process entry point TaskActions names by STRING (TaskActions.ENTRY):
+# nothing references the class, so minification would strip it and every screen action would
+# answer "ERR the tool printed no result line". Minify is off today; the rule is for the day
+# it is on.
+-keep class com.grardb.thorcuts.platform.tasks.TaskTool {
+    public static void main(java.lang.String[]);
+}

@@ -21,7 +21,8 @@ class TaskActionsTest {
     private fun script(command: String): Call =
         Call.Script(listOf("$command 2>&1 | tr '\\n' ' '"))
 
-    private fun actions(g: FakeGateway) = TaskActions(g, main)
+    private fun actions(g: FakeGateway, launchers: Set<String> = emptySet()) =
+        TaskActions(g, main) { launchers }
 
     // ── the tool's subcommands ────────────────────────────────────────────────────────
 
@@ -51,6 +52,49 @@ class TaskActionsTest {
             assertEquals("OK closed 12@$arg com.example", actions(g).closeScreen(screen))
             assertEquals(listOf(entryPoint("close", arg)), g.calls)
         }
+    }
+
+    @Test
+    fun `closeScreen passes the launcher packages after the screen, sorted`() {
+        val refused = "ERR refusing to close launcher rip.moth.cocoonshell on display 4"
+        val g = FakeGateway(refused)
+        val launchers = setOf("rip.moth.cocoonshell", "com.android.launcher3")
+        assertEquals(refused, actions(g, launchers).closeScreen(ScreenTarget.BOTTOM))
+        assertEquals(
+            listOf(entryPoint("close", "4", "com.android.launcher3", "rip.moth.cocoonshell")),
+            g.calls,
+        )
+    }
+
+    @Test
+    fun `closeScreen asks for the launchers on every call`() {
+        var asked = 0
+        val g = FakeGateway("OK closed 1@0 a.b", "OK closed 2@0 a.b")
+        val a = TaskActions(g, main) { asked++; setOf("c.launcher") }
+        a.closeScreen(ScreenTarget.TOP)
+        a.closeScreen(ScreenTarget.TOP)
+        assertEquals(2, asked)
+        assertEquals(
+            listOf(entryPoint("close", "0", "c.launcher"), entryPoint("close", "0", "c.launcher")),
+            g.calls,
+        )
+    }
+
+    @Test
+    fun `closeScreen passes only names that are packages`() {
+        val g = FakeGateway("OK closed 1@4 a.b")
+        val a = TaskActions(g, main) { setOf("rip.moth.cocoonshell", "not a package; rm x") }
+        a.closeScreen(ScreenTarget.BOTTOM)
+        assertEquals(listOf(entryPoint("close", "4", "rip.moth.cocoonshell")), g.calls)
+    }
+
+    @Test
+    fun `closeScreen answers an ERR line when the launchers cannot be resolved`() {
+        val g = FakeGateway()
+        val a = TaskActions(g, main) { throw IllegalStateException("pm dead") }
+        val line = a.closeScreen(ScreenTarget.BOTTOM)
+        assertTrue(line.startsWith("ERR launchers: "), line)
+        assertTrue(g.calls.isEmpty())                  // nothing reached the tool
     }
 
     @Test
@@ -88,6 +132,7 @@ class TaskActionsTest {
         val usage = "Error: Invalid arguments for display ID. Usage: input [<source>] ..."
         val g = FakeGateway("$usage ")
         assertEquals("ERR input: $usage", actions(g).goHome(ScreenTarget.BOTTOM))
+        assertEquals(listOf(script("input -d 4 keyevent KEYCODE_HOME")), g.calls)
     }
 
     // ── open Thorcuts: am start on the display ────────────────────────────────────────
@@ -108,6 +153,16 @@ class TaskActionsTest {
         val g = FakeGateway(out)
         assertEquals("ERR am: $out", actions(g).openThorcuts(ScreenTarget.TOP))
         assertEquals(listOf(script("am start --display 0 -n $quotedMain")), g.calls)
+    }
+
+    @Test
+    fun `openThorcuts reports an exception in am's output as an ERR`() {
+        // A Java trace from am has no "Error:" line, and it begins with "Starting:" like a
+        // success does — which is why the classifier is negative, not startsWith.
+        val out = "Starting: Intent { cmp=x/.Y } Exception occurred while executing 'start': " +
+            "java.lang.SecurityException: Permission Denial"
+        val g = FakeGateway(out)
+        assertEquals("ERR am: $out", actions(g).openThorcuts(ScreenTarget.TOP))
     }
 
     @Test
@@ -194,7 +249,11 @@ class TaskActionsTest {
 
     @Test
     fun `a component that is not one is refused at construction`() {
-        assertFailsWith<IllegalArgumentException> { TaskActions(FakeGateway(), "no slash") }
-        assertFailsWith<IllegalArgumentException> { TaskActions(FakeGateway(), "a.b/.C; rm x") }
+        assertFailsWith<IllegalArgumentException> {
+            TaskActions(FakeGateway(), "no slash") { emptySet() }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TaskActions(FakeGateway(), "a.b/.C; rm x") { emptySet() }
+        }
     }
 }

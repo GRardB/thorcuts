@@ -13,6 +13,7 @@ import com.grardb.thorcuts.platform.config.AndroidConfigFile
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.privilege.Privilege
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
+import com.grardb.thorcuts.platform.tasks.HomePackages
 import com.grardb.thorcuts.platform.tasks.TaskActions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +56,8 @@ class DiagnosticsViewModel(app: Application) : AndroidViewModel(app) {
         gateway,
         // Our own Activity as `am start -n` takes it: what OpenThorcuts launches.
         ComponentName(app, MainActivity::class.java).flattenToShortString(),
+        // The launchers, resolved on every close so a launcher change is honoured.
+        homePackages = { HomePackages.resolve(app.packageManager) },
     )
     private val dispatcher = ActionDispatcher(tasks)
     private val helper = HelperSupervisor(app, gateway, ::onHelperMessage)

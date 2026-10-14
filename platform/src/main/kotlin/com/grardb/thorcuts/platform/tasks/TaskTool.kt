@@ -20,11 +20,12 @@ import android.os.IBinder
  *       com.grardb.thorcuts.platform.tasks.TaskTool list
  *   … TaskTool swap <displayA> <displayB>
  *   … TaskTool focused
- *   … TaskTool close <display|focused>
+ *   … TaskTool close <display|focused> [launcherPkg...]
  *   … TaskTool move <display|focused> <displayA> <displayB>
  *
  * A <display> is an int; `focused` names the display of the window manager's focused
- * root task, resolved here and nowhere else (see [resolveDisplay]).
+ * root task, resolved here and nowhere else (see [resolveDisplay]). The packages after
+ * close's screen are the ones it refuses to close: the launchers, resolved by the app.
  *
  * Contract with the caller: the first line matching ^(OK|ERR) is the result.
  * Everything goes to stdout, because the pservice bridge returns stdout only.
@@ -36,8 +37,13 @@ object TaskTool {
     /** The screen argument that means "wherever input focus is": see [resolveDisplay]. */
     private const val FOCUSED = "focused"
 
-    private const val USAGE = "usage: list | swap <displayA> <displayB> | focused | " +
-        "close <display|focused> | move <display|focused> <displayA> <displayB>"
+    private const val SWAP_ARGS = "swap <displayA> <displayB>"
+    private const val CLOSE_ARGS = "close <display|focused> [launcherPkg...]"
+    private const val MOVE_ARGS = "move <display|focused> <displayA> <displayB>"
+    private const val SWAP_USAGE = "usage: $SWAP_ARGS"
+    private const val CLOSE_USAGE = "usage: $CLOSE_ARGS"
+    private const val MOVE_USAGE = "usage: $MOVE_ARGS"
+    private const val USAGE = "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $MOVE_ARGS"
 
     /**
      * `WindowConfiguration.ACTIVITY_TYPE_HOME` — @hide, so written out.
@@ -66,26 +72,15 @@ object TaskTool {
             val atm = activityTaskManager() ?: return fail(3, "activity_task service unavailable")
             when (args.firstOrNull()) {
                 "list" -> list(atm)
-                "swap" -> {
-                    val a = args.getOrNull(1)?.toIntOrNull()
-                    val b = args.getOrNull(2)?.toIntOrNull()
-                    if (a == null || b == null) fail(2, "usage: swap <displayA> <displayB>")
-                    else swap(atm, a, b)
-                }
+                "swap" -> swap(atm, intArg(args, 1, SWAP_USAGE), intArg(args, 2, SWAP_USAGE))
                 "focused" -> focused(atm)
-                "close" -> {
-                    val screen = args.getOrNull(1) ?: fail(2, "usage: close <display|focused>")
-                    close(atm, screen)
-                }
-                "move" -> {
-                    val screen = args.getOrNull(1)
-                    val a = args.getOrNull(2)?.toIntOrNull()
-                    val b = args.getOrNull(3)?.toIntOrNull()
-                    if (screen == null || a == null || b == null) {
-                        fail(2, "usage: move <display|focused> <displayA> <displayB>")
-                    }
-                    move(atm, screen, a, b)
-                }
+                "close" -> close(atm, arg(args, 1, CLOSE_USAGE), args.drop(2))
+                "move" -> move(
+                    atm,
+                    arg(args, 1, MOVE_USAGE),
+                    intArg(args, 2, MOVE_USAGE),
+                    intArg(args, 3, MOVE_USAGE),
+                )
                 else -> fail(2, USAGE)
             }
         } catch (t: Throwable) {
@@ -110,12 +105,20 @@ object TaskTool {
             )
         }
         // The focused root task, so a FOCUSED decision can be checked from one `list`:
-        // close/move/open on FOCUSED act on THIS display (resolveDisplay).
-        val focused = focusedRootTask(atm)
-        println(
-            if (focused == null) "F none"
-            else "F ${focused.taskId} display=${displayOf(focused)} pkg=${packageOf(focused)}"
-        )
+        // close/move/open on FOCUSED act on THIS display (resolveDisplay). A ROM without
+        // the focus API must not cost the R lines below — `list` is the diagnostic — so the
+        // failure is printed as its own F line and the listing goes on; the actions that
+        // need focus still fail loud through resolveDisplay.
+        try {
+            val focus = focusedRootTask(atm)
+            println(
+                if (focus == null) "F none"
+                else "F ${focus.taskId} display=${displayOf(focus)} pkg=${packageOf(focus)}"
+            )
+        } catch (t: Throwable) {
+            // Throwable, as main() does: reflection raises linkage errors too.
+            println("F unavailable: ${chain(t)}")
+        }
         val roots = rootTasks(atm)
         roots.forEach {
             // type= is the topmost LEAF's activity type, kept because it is useful
@@ -180,7 +183,7 @@ object TaskTool {
             return fail(4, "no app to swap on display $displayA or $displayB")
         }
 
-        val move = moveRootTaskMethod(atm)
+        val mover = moveRootTaskMethod(atm)
 
         // Task ids were captured before either move, so the second call is unaffected
         // by the first.
@@ -193,7 +196,7 @@ object TaskTool {
             // into the generic top-level catch, and must NOT be reverted (a revert
             // could itself fail and make the state harder to reason about).
             try {
-                move.invoke(atm, onA.taskId, displayB)
+                mover.invoke(atm, onA.taskId, displayB)
             } catch (t: Throwable) {
                 return fail(
                     7,
@@ -201,7 +204,7 @@ object TaskTool {
                 )
             }
             try {
-                move.invoke(atm, onB.taskId, displayA)
+                mover.invoke(atm, onB.taskId, displayA)
             } catch (t: Throwable) {
                 // The "both tasks are now on display $displayB" clause sits AFTER
                 // ${chain(t)}, and that is fine. The guarantee that matters is not
@@ -227,7 +230,7 @@ object TaskTool {
         // it is NOT a swap and must never be reported as one.
         val (task, from, to) = if (onA != null) Triple(onA, displayA, displayB) else Triple(onB!!, displayB, displayA)
         try {
-            move.invoke(atm, task.taskId, to)
+            mover.invoke(atm, task.taskId, to)
         } catch (t: Throwable) {
             // Unlike the two-sided branch, there is no partial state to describe
             // here: this move either happens or it doesn't.
@@ -236,7 +239,13 @@ object TaskTool {
         ok("moved ${task.taskId}@$from -> $to; display $to had no app to send back")
     }
 
-    /** Which display holds input focus, and what is focused there. */
+    /**
+     * Which display holds input focus, and what is focused there. Unlike every other id
+     * this tool prints, task= and pkg= name the focused ROOT task itself — which may be the
+     * home stack or a picture-in-picture window, not an app — so the app side reads
+     * display= only (TaskActions.openThorcuts) and chooses the app through [isApp] like
+     * everything else.
+     */
     private fun focused(atm: Any) {
         val f = focusedRootTask(atm) ?: fail(10, "no focused root task")
         ok("focused display=${displayOf(f)} task=${f.taskId} pkg=${packageOf(f)}")
@@ -273,31 +282,50 @@ object TaskTool {
             ?: fail(6, "moveRootTaskToDisplay not found; candidates=" + signatures(atm, "Display"))
 
     /**
-     * Close the app on a screen: `removeTask` on its root task.
+     * Close the app on a screen: `removeTask` on its root task — unless that app is a
+     * launcher. A launcher relaunched as an ordinary task passes [isApp] (Cocoon, measured
+     * as type=standard on the bottom screen, 2026-10-13) and `removeTask` would remove it;
+     * the app side resolves the HOME / SECONDARY_HOME packages with PackageManager (no
+     * privilege) and passes them as [launchers], refused here by name. The predicate stays
+     * the swap's.
      *
      * What becomes of the app's PROCESS depends on the state of its activities, and
      * both cases are MEASURED: a STOPPED app's task removed (M1, the recents swipe-away
      * path) kills the process when every activity it had lived in that task and it holds
      * no foreground service; the FOREGROUND app's task removed (the actions run,
      * 2026-10-13, on Thorcuts itself) finishes the activity and leaves the process alive
-     * as a cached, empty one — AMS skips the kill while any activity in the process is
-     * not yet stopped. So closing Thorcuts' OWN task does not stop the helper: it keeps
-     * working, with no UI, until the system reclaims the cached process (an undefined
-     * lifetime; owner decision, recorded in the actions spec). The vacated screen is
-     * refilled by its SECONDARY_HOME within seconds (M1), so the line says `closed`, not
-     * "blank".
+     * — AMS skips the kill while any activity in the process is not yet stopped, and
+     * skips it outright while the process holds a foreground service. Thorcuts' OWN task
+     * is that second case either way once shortcuts are on: the holder's service keeps
+     * the process, the Activity goes, and the helper keeps working (the holder spec). The
+     * vacated screen is refilled by its SECONDARY_HOME within seconds (M1), so the line
+     * says `closed`, not "blank".
      */
-    private fun close(atm: Any, screen: String) {
+    private fun close(atm: Any, screen: String, launchers: List<String>) {
         val display = resolveDisplay(atm, screen)
         val task = appOn(rootTasks(atm), display)
             ?: fail(11, "no app to close on display $display")
+        val pkg = packageOf(task)
+        // The guard reads both the top and the base activity: a launcher task with a foreign
+        // activity on top is still the launcher's task (the inverse costs only a refusal the
+        // user can read). A task that names no package at all is NOT closed: "?" is the one
+        // default packageOf() allows, for printing, and it may not decide a destructive call.
+        val names = listOfNotNull(task.topActivity?.packageName, task.baseActivity?.packageName)
+        if (names.isEmpty()) fail(18, "cannot name the app on display $display; not closing")
+        val launcher = names.firstOrNull { it in launchers }
+        if (launcher != null) fail(17, "refusing to close launcher $launcher on display $display")
+        // By the int parameter, not the count: a one-argument sibling would otherwise be
+        // picked here and fail at invoke.
         val remove = atm.javaClass.methods
-            .firstOrNull { it.name == "removeTask" && it.parameterCount == 1 }
+            .firstOrNull {
+                it.name == "removeTask" &&
+                    it.parameterTypes.singleOrNull() == Int::class.javaPrimitiveType
+            }
             ?: fail(6, "removeTask not found; candidates=" + signatures(atm, "remove"))
         val removed = remove.invoke(atm, task.taskId) as? Boolean
             ?: fail(12, "removeTask(${task.taskId}) did not return a boolean")
         if (!removed) fail(13, "removeTask(${task.taskId}) returned false")
-        ok("closed ${task.taskId}@$display ${packageOf(task)}")
+        ok("closed ${task.taskId}@$display $pkg")
     }
 
     /**
@@ -317,17 +345,16 @@ object TaskTool {
         val roots = rootTasks(atm)
         val task = appOn(roots, from) ?: fail(15, "no app to move on display $from")
         val covered = appOn(roots, to)
-        val move = moveRootTaskMethod(atm)
+        val mover = moveRootTaskMethod(atm)
         try {
-            move.invoke(atm, task.taskId, to)
+            mover.invoke(atm, task.taskId, to)
         } catch (t: Throwable) {
             // Nothing has moved: a one-sided move either happens or it doesn't.
             fail(16, "nothing moved; task ${task.taskId}@$from -> $to failed: ${chain(t)}")
         }
-        ok(
-            "moved ${task.taskId}@$from -> $to" +
-                if (covered != null) " over ${covered.taskId}@$to" else "; display $to had no app"
-        )
+        val onto =
+            if (covered != null) " over ${covered.taskId}@$to" else "; display $to had no app"
+        ok("moved ${task.taskId}@$from -> $to$onto")
     }
 
     private fun activityTaskManager(): Any? {
@@ -627,10 +654,10 @@ object TaskTool {
      * no launcher is a screen with nothing on it. The predicate keys on the root task's
      * own activity TYPE, so a launcher relaunched as an ordinary task (parent spec §9's
      * known edge; Cocoon was measured in that state on the bottom screen, 2026-10-13)
-     * passes it — the swap moves it, and close would remove it. Refusing the resolved
-     * HOME / SECONDARY_HOME packages belongs with the app side, which can ask
-     * PackageManager; carried. Written for the swap first (the paragraphs below are that
-     * record) and reused unchanged by [close] and [move].
+     * passes it — the swap moves it, and [close] refuses it by name: the app side resolves
+     * the HOME / SECONDARY_HOME packages with PackageManager and passes them in. Written
+     * for the swap first (the paragraphs below are that record) and reused unchanged by
+     * [close] and [move].
      *
      * Visible, not the launcher, and not a picture-in-picture window. Both
      * exclusions are not style choices — WindowManager refuses those moves, and
@@ -725,6 +752,14 @@ object TaskTool {
         }
         return sb.toString().replace('\n', ' ').replace('\r', ' ')
     }
+
+    /** Positional argument [i], or [usage] as the ERR line. */
+    private fun arg(args: Array<String>, i: Int, usage: String): String =
+        args.getOrNull(i) ?: fail(2, usage)
+
+    /** Positional argument [i] as an int, or [usage] as the ERR line. */
+    private fun intArg(args: Array<String>, i: Int, usage: String): Int =
+        arg(args, i, usage).toIntOrNull() ?: fail(2, usage)
 
     // ok() and fail() return Nothing: the process ends inside them, so a caller may
     // write `x ?: fail(…)` and the compiler knows no value is needed after it.

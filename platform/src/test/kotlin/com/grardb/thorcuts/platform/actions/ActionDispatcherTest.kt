@@ -18,7 +18,7 @@ class ActionDispatcherTest {
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
 
     private fun dispatcher(g: FakeGateway) =
-        ActionDispatcher(TaskActions(g, "com.grardb.thorcuts/.MainActivity"))
+        ActionDispatcher(TaskActions(g, "com.grardb.thorcuts/.MainActivity") { emptySet() })
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 

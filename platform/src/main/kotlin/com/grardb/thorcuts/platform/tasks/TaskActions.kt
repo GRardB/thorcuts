@@ -19,8 +19,16 @@ import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
  * (`com.grardb.thorcuts/.MainActivity`); the app passes it so this module need not know
  * the app's package. Validated at construction, then quoted like any component that
  * reaches a root shell — a value the app computes is not a silent exception to the rule.
+ *
+ * [homePackages] answers "which packages are a launcher" — HOME and SECONDARY_HOME, as
+ * `HomePackages.resolve` reads them from PackageManager — and is asked on every close, so
+ * a launcher change is honoured; the tool refuses to close any of them by name.
  */
-class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
+class TaskActions(
+    private val gateway: PrivilegeGateway,
+    thorcutsMain: String,
+    private val homePackages: () -> Set<String>,
+) {
 
     private val thorcutsMainArg: String = CommandSafety.componentArg(thorcutsMain)
         ?: throw IllegalArgumentException("not a component name: '$thorcutsMain'")
@@ -34,8 +42,25 @@ class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
      */
     fun swapScreens(): String = tool("swap", TOP, BOTTOM)
 
-    /** Close the app on [screen]: the tool's `close`. */
-    fun closeScreen(screen: ScreenTarget): String = tool("close", screenArg(screen))
+    /**
+     * Close the app on [screen]: the tool's `close`, with the launcher packages after the
+     * screen so the tool refuses them by name (a launcher relaunched as an ordinary task
+     * passes its app predicate; measured). Resolved on every call; filtered by the package
+     * rule here as well as in `HomePackages`, because what reaches a root shell is validated
+     * at the boundary that reaches it, unconditionally; sorted, so the command is
+     * deterministic; the gateway quotes them like every argument. A resolver that throws —
+     * it is a binder call — is answered as a line, and nothing is closed: an empty set would
+     * be the silent default this class forbids, since every device has a HOME handler.
+     */
+    fun closeScreen(screen: ScreenTarget): String {
+        val launchers = try {
+            homePackages()
+        } catch (e: RuntimeException) {
+            return "ERR launchers: $e"
+        }
+        val args = launchers.filter { CommandSafety.isPackage(it) }.sorted()
+        return tool("close", screenArg(screen), *args.toTypedArray())
+    }
 
     /** Send the focused screen's app to the other screen: the tool's `move`. */
     fun moveFocusedToOtherScreen(): String = tool("move", FOCUSED, TOP, BOTTOM)
@@ -66,8 +91,10 @@ class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
      * Activity — exactly when a shortcut needs it) does not apply. `am` prints
      * `Starting: Intent {…}` first and an `Error: …` or a "brought to the front" warning
      * on later lines; pservice returns one line, so the script folds them and this
-     * classifies. For FOCUSED the tool is asked which display first: two round trips,
-     * serialised on the one thread.
+     * classifies: `Error` or `Exception` anywhere in the output is a failure (a Java trace
+     * from `am` has no `Error:` line). A positive `Starting:` test would not do — `am`
+     * prints it BEFORE it tries, so a failed start begins with it too. For FOCUSED the tool
+     * is asked which display first: two round trips, serialised on the one thread.
      */
     fun openThorcuts(screen: ScreenTarget): String {
         val display = if (screen == ScreenTarget.FOCUSED) {
@@ -79,7 +106,8 @@ class TaskActions(private val gateway: PrivilegeGateway, thorcutsMain: String) {
             screenArg(screen)
         }
         val out = shell("am start --display $display -n $thorcutsMainArg") ?: return NO_REPLY
-        return if ("Error" in out) "ERR am: $out" else "OK display $display: $out"
+        return if ("Error" in out || "Exception" in out) "ERR am: $out"
+        else "OK display $display: $out"
     }
 
     private fun tool(vararg args: String): String {
