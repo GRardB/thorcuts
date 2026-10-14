@@ -6,7 +6,12 @@ import kotlin.test.assertEquals
 
 class ConfigMergeTest {
 
-    private fun shortcut(id: String) = Defaults.SWAP_SCREENS.copy(id = id)
+    /** Distinct triggers per id (the button is the id's first letter): a list of these is a
+     *  valid config, and two with different ids never repeat a trigger. */
+    private fun shortcut(id: String) = Defaults.SWAP_SCREENS.copy(
+        id = id,
+        trigger = Defaults.SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
+    )
     private fun extras(vararg pairs: Pair<String, String>) =
         pairs.associate { (k, v) -> k to JsonPrimitive(v) }
 
@@ -39,6 +44,18 @@ class ConfigMergeTest {
         assertEquals(listOf("c"), r.added)
         assertEquals(listOf("b"), r.skipped)
         assertEquals(imported.dropped, r.dropped)
+    }
+
+    @Test
+    fun `an imported shortcut with a new id but a current trigger is skipped`() {
+        val repeat = shortcut("a").copy(id = "a2")       // a's trigger under a new id
+        val clash = DecodeResult.Ok(
+            ThorcutsConfig(listOf(repeat, shortcut("c"))), emptyList(), null,
+        )
+        val r = ConfigMerge.merge(current, clash)
+        assertEquals(listOf("a", "b", "c"), r.config.shortcuts.map { it.id })
+        assertEquals(listOf("c"), r.added)
+        assertEquals(listOf("a2"), r.skipped)
     }
 
     @Test

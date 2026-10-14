@@ -382,6 +382,22 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun `an update that enables a parked duplicate is rejected, and nothing moves`() {
+        val parked = Defaults.SWAP_SCREENS.copy(id = "parked", enabled = false)
+        val s = store(default = ThorcutsConfig(listOf(Defaults.SWAP_SCREENS, parked)))
+        runBlocking { s.load() }
+        s.helperReady()
+        val before = s.config.value
+        val outcome = runBlocking { s.update { it.withEnabled("parked", true) } }
+        val reason = "'parked' repeats the trigger of 'swap-screens' everywhere"
+        assertEquals(UpdateOutcome.Rejected(reason), outcome)
+        assertEquals(before, s.config.value)
+        assertEquals(1, file.writes.size)          // the default at load; nothing since
+        assertEquals(listOf(1), pushedGens())      // helperReady's push; nothing since
+        assertTrue(events.none { it is Event.Written })
+    }
+
+    @Test
     fun `the default is whatever the store was given`() {
         val mine = Defaults.SWAP_SCREENS.copy(id = "mine", scope = Scope.Global(setOf(RETROARCH)))
         val custom = ThorcutsConfig(listOf(mine))

@@ -15,7 +15,14 @@ import kotlin.test.assertTrue
 
 class ThorcutsConfigTest {
 
-    private fun shortcut(id: String, enabled: Boolean = true) =
+    /** Distinct triggers per id (the button is the id's first letter), so a list of these
+     *  is a valid config; [twin] is the same trigger as the default, for Rule 2's tests. */
+    private fun shortcut(id: String, enabled: Boolean = true) = Defaults.SWAP_SCREENS.copy(
+        id = id,
+        trigger = Defaults.SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
+        enabled = enabled,
+    )
+    private fun twin(id: String, enabled: Boolean = true) =
         Defaults.SWAP_SCREENS.copy(id = id, enabled = enabled)
 
     @Test
@@ -24,6 +31,24 @@ class ThorcutsConfigTest {
             ThorcutsConfig(listOf(shortcut("a"), shortcut("b"), shortcut("a")))
         }
         assertTrue("a" in e.message!!, e.message)
+    }
+
+    @Test
+    fun `two enabled shortcuts with the same trigger where both apply are refused`() {
+        val e = assertFailsWith<IllegalArgumentException> {
+            ThorcutsConfig(listOf(twin("a"), twin("b")))
+        }
+        assertEquals("'b' repeats the trigger of 'a' everywhere", e.message)
+        ThorcutsConfig(listOf(twin("a"), twin("b", enabled = false)))      // parked: fine
+    }
+
+    @Test
+    fun `withEnabled onto a parked duplicate is refused while its twin is on, fine once off`() {
+        val c = ThorcutsConfig(listOf(twin("a"), twin("b", enabled = false)))
+        val e = assertFailsWith<IllegalArgumentException> { c.withEnabled("b", true) }
+        assertEquals("'b' repeats the trigger of 'a' everywhere", e.message)
+        val swapped = c.withEnabled("a", false).withEnabled("b", true)
+        assertEquals(listOf(false, true), swapped.shortcuts.map { it.enabled })
     }
 
     @Test

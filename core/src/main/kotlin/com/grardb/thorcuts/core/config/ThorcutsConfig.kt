@@ -1,14 +1,19 @@
 package com.grardb.thorcuts.core.config
 
 import com.grardb.thorcuts.core.model.Shortcut
+import com.grardb.thorcuts.core.rules.ConflictDetector
 import kotlinx.serialization.json.JsonElement
 
 /**
  * The user's shortcut list (parent spec §10), as an immutable value.
  *
- * Ids are unique: an import merges by them and [unknown] is keyed by them. [unknown] is
- * what the codec read and did not understand, carried so that a write by this version does
- * not strip what a newer one wrote.
+ * Ids are unique: an import merges by them and [unknown] is keyed by them. No enabled
+ * shortcut repeats an earlier enabled one's trigger where both apply — the matcher would
+ * fire the earlier and never the later (conflict-detector spec, Rule 2; the codec drops
+ * such an entry on load, the merge skips one on import, and `withEnabled` onto a parked
+ * duplicate throws, which the store reports as a rejected write). [unknown] is what the
+ * codec read and did not understand, carried so that a write by this version does not
+ * strip what a newer one wrote.
  */
 data class ThorcutsConfig(
     val shortcuts: List<Shortcut>,
@@ -17,6 +22,9 @@ data class ThorcutsConfig(
     init {
         val repeated = shortcuts.groupingBy { it.id }.eachCount().filterValues { it > 1 }.keys
         require(repeated.isEmpty()) { "shortcut ids repeat: $repeated" }
+        ConflictDetector.firstConflict(shortcuts)?.let {
+            throw IllegalArgumentException(it.reason)
+        }
     }
 
     fun shortcut(id: String): Shortcut? = shortcuts.firstOrNull { it.id == id }

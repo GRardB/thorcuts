@@ -194,6 +194,16 @@ class ConfigCodecTest {
     }
 
     @Test
+    fun `a later enabled shortcut repeating a trigger is dropped, naming the earlier one`() {
+        val again = swap.replace(""""id":"swap"""", """"id":"again"""")
+        val parked = swap.replace(""""id":"swap"""", """"id":"parked","enabled":false""")
+        val r = ok(file(swap, again, parked))
+        assertEquals(listOf("swap", "parked"), r.config.shortcuts.map { it.id })
+        val reason = "'again' repeats the trigger of 'swap' everywhere"
+        assertEquals(Dropped(1, "again", reason), r.dropped.single())
+    }
+
+    @Test
     fun `an Apps scope with no packages is dropped`() = assertDrops(
         listOf(
             swap.dropLast(1) + ""","scope":{"kind":"Apps","included":[]}}"""

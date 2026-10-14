@@ -10,6 +10,7 @@ import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
 import com.grardb.thorcuts.core.model.TriggerStyle
+import com.grardb.thorcuts.core.rules.ConflictDetector
 import com.grardb.thorcuts.core.rules.RuleTableFormat
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerializationException
@@ -49,9 +50,10 @@ data class Dropped(val index: Int, val id: String?, val reason: String)
  * JSON in and out for [ThorcutsConfig] (parent spec §10; layout in the config spec, "The file").
  *
  * Reading is forgiving per shortcut and strict per file: any one entry the walk cannot read,
- * or that a model `init` refuses, becomes a [Dropped] and the walk goes on; a file whose
- * frame is wrong is [DecodeResult.Failed]. Writing is total and canonical: known members in a
- * fixed order, sets sorted, then the unknown members as they were read.
+ * or that a model `init` refuses, or that repeats an earlier entry's id or (enabled, where
+ * both apply) its trigger, becomes a [Dropped] and the walk goes on; a file whose frame is
+ * wrong is [DecodeResult.Failed]. Writing is total and canonical: known members in a fixed
+ * order, sets sorted, then the unknown members as they were read.
  */
 object ConfigCodec {
     const val SCHEMA_VERSION = 1
@@ -114,6 +116,14 @@ object ConfigCodec {
             }
             if (shortcuts.any { it.id == shortcut.id }) {
                 dropped += Dropped(index, id, "duplicate id")
+                continue
+            }
+            // The config's own invariant (Rule 2), applied here so one repeated trigger costs
+            // that entry and not the whole file. The earlier one is kept: it is the one that
+            // would have fired.
+            val conflict = ConflictDetector.conflict(shortcuts, shortcut)
+            if (conflict != null) {
+                dropped += Dropped(index, id, conflict.reason)
                 continue
             }
             shortcuts += shortcut
