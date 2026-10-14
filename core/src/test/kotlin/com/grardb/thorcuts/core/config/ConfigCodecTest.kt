@@ -189,7 +189,8 @@ class ConfigCodecTest {
         val r = ok(file(swap, homeTap))
         assertEquals(listOf("swap"), r.config.shortcuts.map { it.id })
         val d = r.dropped.single()
-        assertEquals(Dropped(1, "home-tap", d.reason), d)
+        assertEquals(1, d.index)
+        assertEquals("home-tap", d.id)
         assertTrue("tap HOME alone" in d.reason && "go home" in d.reason, d.reason)
     }
 

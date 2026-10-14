@@ -30,7 +30,7 @@ class ThorcutsConfigTest {
         val e = assertFailsWith<IllegalArgumentException> {
             ThorcutsConfig(listOf(shortcut("a"), shortcut("b"), shortcut("a")))
         }
-        assertTrue("a" in e.message!!, e.message)
+        assertTrue("ids repeat" in e.message!! && "a" in e.message!!, e.message)
     }
 
     @Test

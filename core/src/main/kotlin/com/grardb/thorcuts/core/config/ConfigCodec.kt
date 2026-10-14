@@ -119,8 +119,10 @@ object ConfigCodec {
                 continue
             }
             // The config's own invariant (Rule 2), applied here so one repeated trigger costs
-            // that entry and not the whole file. The earlier one is kept: it is the one that
-            // would have fired.
+            // that entry and not the whole file. The earlier one is kept — the one that fired,
+            // except when the later is a PRESS and the earlier a HOLD on the same sets (the
+            // matcher prefers the PRESS; ConflictDetector.sameTrigger). Only a file written
+            // before Rule 2, or by hand, can hold such a pair.
             val conflict = ConflictDetector.conflict(shortcuts, shortcut)
             if (conflict != null) {
                 dropped += Dropped(index, id, conflict.reason)

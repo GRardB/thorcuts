@@ -28,7 +28,10 @@ object ConflictDetector {
         HOLD_ON_GAMEPLAY_MODIFIER,
     }
 
-    /** [later] repeats [earlier]'s trigger where both apply ([where]); only [earlier] fires. */
+    /** [later] repeats [earlier]'s trigger where both apply ([where]); only one of them ever
+     *  fires — [earlier], unless [later] is a PRESS and [earlier] a HOLD on the same sets, where
+     *  the matcher prefers the PRESS (see [sameTrigger]). Only a file written before this rule,
+     *  or by hand, can hold such a pair. */
     data class Conflict(val earlier: Shortcut, val later: Shortcut, val where: Scope) {
         /** One text for the model's `require`, the codec's `Dropped` and the store's
          *  `Rejected`: the two ids (what the editor shows) and where they meet. */
