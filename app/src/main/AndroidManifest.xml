@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- The foreground service that keeps the helper alive with no screen open, its type,
+         the boot start, and the notification that shows it (runtime on API 33+; refused, the
+         service still runs and shows only in the system's active-apps chip). Holder spec. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Package visibility (API 30+): HomePackages asks PackageManager which packages answer
          HOME and SECONDARY_HOME, so `close` can refuse to remove a launcher. -->
     <queries>
@@ -15,6 +23,7 @@
     </queries>
 
     <application
+        android:name=".ThorcutsApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
@@ -32,6 +41,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- The keep-alive. specialUse: nothing else fits a gamepad grab; the property is the
+             declaration API 34+ requires. Unenforced on this API 33 ROM; declared so the same
+             APK survives a newer one. -->
+        <service
+            android:name=".HelperService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the controller-shortcut helper alive with no screen open" />
+        </service>
+
+        <!-- Not exported: BOOT_COMPLETED is a protected broadcast the system sends, and root
+             and system uids pass the component check regardless. UNVERIFIED on this ROM until
+             the holder's device run; the fallback is exported="true". -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">Thorcuts</string>
+    <string name="status_channel">Thorcuts status</string>
+    <string name="status_title">Thorcuts is on</string>
+    <string name="status_text">Controller shortcuts are active. Tap to open.</string>
 </resources>

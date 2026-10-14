@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The foreground service's status icon: a rounded bar, white (the system tints it). The
+     adaptive launcher icon is not a valid small icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6,9h12a3,3 0 0 1 0,6H6a3,3 0 0 1 0,-6z" />
+</vector>

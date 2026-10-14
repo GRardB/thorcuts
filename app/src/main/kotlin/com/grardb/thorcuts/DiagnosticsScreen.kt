@@ -1,5 +1,9 @@
 package com.grardb.thorcuts
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -107,16 +111,31 @@ fun DiagnosticsScreen(vm: DiagnosticsViewModel) {
             Text("Input helper", style = MaterialTheme.typography.labelMedium)
             Text(state.helperState, style = MaterialTheme.typography.bodyMedium)
             Text(state.tableState, style = MaterialTheme.typography.bodyMedium)
-            Row(
+            // The switch. Turning ON asks for the notification permission first — on API
+            // 33+ the service's notification is invisible without it — and turns on whatever
+            // the answer; the contract returns at once when already granted, so the dialog
+            // shows once. OFF needs nothing. Disabled while a start or stop is in flight,
+            // and the text says which.
+            val askNotifications = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission(),
+            ) { vm.setEnabled(true) }
+            OutlinedButton(
+                onClick = {
+                    when {
+                        state.enabled -> vm.setEnabled(false)
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
+                            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else -> vm.setEnabled(true)
+                    }
+                },
+                enabled = state.transition == null,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedButton(onClick = vm::startHelper, enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    Text("Start helper")
-                }
-                OutlinedButton(onClick = vm::stopHelper, enabled = !state.busy, modifier = Modifier.weight(1f)) {
-                    Text("Stop helper")
-                }
+                Text(
+                    state.transition
+                        ?: if (state.enabled) "Shortcuts: ON — tap to turn off"
+                        else "Shortcuts: OFF — tap to turn on"
+                )
             }
 
             HorizontalDivider()
