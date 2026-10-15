@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Color
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: DiagnosticsViewModel by viewModels()
+    private val viewModel: ThorcutsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
                 )
             ) {
                 Surface(color = Color.Black) {
-                    DiagnosticsScreen(viewModel)
+                    ThorcutsScreen(viewModel)
                 }
             }
         }

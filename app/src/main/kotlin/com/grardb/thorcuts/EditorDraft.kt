@@ -1,0 +1,164 @@
+package com.grardb.thorcuts
+
+import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.Control
+import com.grardb.thorcuts.core.model.ModifierKey
+import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.ScreenTarget
+import com.grardb.thorcuts.core.model.Shortcut
+import com.grardb.thorcuts.core.model.ThorControls
+import com.grardb.thorcuts.core.model.Trigger
+import com.grardb.thorcuts.core.model.TriggerStyle
+
+/** The five kinds of action the editor offers; three of them aim at a screen. */
+enum class ActionKind(val label: String, val takesScreen: Boolean) {
+    SWAP("Swap the screens", false),
+    MOVE("Move the focused app to the other screen", false),
+    CLOSE("Close the app on", true),
+    HOME("Go home on", true),
+    OPEN("Open Thorcuts on", true);
+
+    fun action(screen: ScreenTarget): Action = when (this) {
+        SWAP -> Action.SwapScreens
+        MOVE -> Action.MoveFocusedToOtherScreen
+        CLOSE -> Action.CloseScreen(screen)
+        HOME -> Action.GoHome(screen)
+        OPEN -> Action.OpenThorcuts(screen)
+    }
+
+    companion object {
+        fun of(action: Action): ActionKind = when (action) {
+            Action.SwapScreens -> SWAP
+            Action.MoveFocusedToOtherScreen -> MOVE
+            is Action.CloseScreen -> CLOSE
+            is Action.GoHome -> HOME
+            is Action.OpenThorcuts -> OPEN
+        }
+
+        fun screenOf(action: Action): ScreenTarget? = when (action) {
+            is Action.CloseScreen -> action.screen
+            is Action.GoHome -> action.screen
+            is Action.OpenThorcuts -> action.screen
+            else -> null
+        }
+    }
+}
+
+/** The screen an action aims at, as the list names it. */
+fun ScreenTarget.label(): String = when (this) {
+    ScreenTarget.TOP -> "the top screen"
+    ScreenTarget.BOTTOM -> "the bottom screen"
+    ScreenTarget.FOCUSED -> "the focused screen"
+}
+
+/** The same, as the editor's choice names it: FOCUSED explained once, where it is chosen. */
+fun ScreenTarget.choiceLabel(): String =
+    if (this == ScreenTarget.FOCUSED) FOCUSED_EXPLAINED else label()
+
+/** An action as the list names it: "Close the app on the focused screen". */
+fun Action.label(): String {
+    val kind = ActionKind.of(this)
+    val screen = ActionKind.screenOf(this) ?: return kind.label
+    return "${kind.label} ${screen.label()}"
+}
+
+/** One line for a scope that is not a plain Global(), null for one. Shown, never edited
+ *  here: M4's app picker is where a scope is set. */
+fun Scope.line(): String? = when (this) {
+    is Scope.Global ->
+        if (excluded.isEmpty()) null
+        else "Everywhere except: ${excluded.sorted().joinToString(", ")}"
+    is Scope.Apps -> "Applies only in: ${included.sorted().joinToString(", ")}"
+}
+
+const val FOCUSED_EXPLAINED =
+    "the focused screen — the one you last touched or that last took input"
+
+/** The editor's copy, pinned by the spec. */
+object Copy {
+    const val RECORDING =
+        "Press the combo now — nothing you press reaches the device until you let go"
+    const val NOT_RECORDED = "Not recorded yet"
+    const val RECORD = "Record"
+    const val RECORD_OFF = "Turn shortcuts on to record"
+    const val NEEDS_MODIFIER = "A shortcut starts with AYN, Home, Back, Start or Select."
+    const val MODIFIER_NOTE = "A shortcut on Start or Select makes a plain tap of that button " +
+        "reach the game only when it is released."
+    const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
+        "release — it will feel late in that game."
+    val NOTES = listOf(
+        "The notification is the sign the helper is alive.",
+        "Force stop in Settings, or Stop in the system's active-apps chip, turns shortcuts off " +
+            "until Thorcuts is next opened.",
+        "After an app is moved onto the top screen, the stock launcher may show there until " +
+            "Cocoon returns.",
+    )
+}
+
+/**
+ * What the editor holds while a shortcut is being added or edited. The model's rules are not
+ * repeated here: [trigger] and [toShortcut] build the real values and throw the model's own
+ * messages, and they are called only where a throw is caught — inside the edit lambda the
+ * ViewModel hands the coordinator (a `Rejected(reason)` under Save) and under `runCatching`
+ * for the warnings.
+ */
+data class EditorDraft(
+    /** The shortcut being edited; null when adding. Its scope and enabled flag are kept. */
+    val original: Shortcut? = null,
+    val id: String = "",
+    val modifiers: Set<ModifierKey> = emptySet(),
+    val buttons: Set<Control> = emptySet(),
+    val timer: Boolean = false,
+    val holdMs: String = "400",
+    val action: ActionKind = ActionKind.SWAP,
+    val screen: ScreenTarget = ScreenTarget.FOCUSED,
+    /** The last Rejected reason, shown under Save until the next change. */
+    val error: String? = null,
+) {
+    val recorded: Boolean get() = modifiers.isNotEmpty() || buttons.isNotEmpty()
+
+    /** The trigger the draft describes, or a throw with the model's message. */
+    fun trigger(): Trigger {
+        val ms = if (!timer) {
+            null
+        } else {
+            holdMs.trim().toIntOrNull()
+                ?: throw IllegalArgumentException("the timer needs a number of milliseconds")
+        }
+        val style = if (timer) TriggerStyle.HOLD else TriggerStyle.PRESS
+        return Trigger(modifiers, buttons, style, ms)
+    }
+
+    /** The shortcut the draft describes; the original's scope and enabled flag are kept. */
+    fun toShortcut(): Shortcut = Shortcut(
+        id = id.trim(),
+        trigger = trigger(),
+        action = action.action(screen),
+        scope = original?.scope ?: Scope.Global(),
+        enabled = original?.enabled ?: true,
+    )
+
+    /** The recorded combo as text: the trigger's description when it is one, else the names
+     *  pressed so far (no modifier yet), else "Not recorded yet". */
+    val triggerText: String
+        get() {
+            if (!recorded) return Copy.NOT_RECORDED
+            runCatching { trigger() }.getOrNull()?.let { return ThorControls.describe(it) }
+            val names = modifiers.map { ThorControls.name(it) } +
+                buttons.map { ThorControls.name(it) }
+            return names.joinToString(" + ")
+        }
+
+    companion object {
+        fun of(s: Shortcut) = EditorDraft(
+            original = s,
+            id = s.id,
+            modifiers = s.trigger.modifiers,
+            buttons = s.trigger.buttons,
+            timer = s.trigger.style == TriggerStyle.HOLD,
+            holdMs = (s.trigger.holdMs ?: 400).toString(),
+            action = ActionKind.of(s.action),
+            screen = ActionKind.screenOf(s.action) ?: ScreenTarget.FOCUSED,
+        )
+    }
+}
