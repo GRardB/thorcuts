@@ -146,6 +146,14 @@ class ConflictDetectorTest {
     }
 
     @Test
+    fun `conflict names the first of several matching accepted entries, in list order`() {
+        val accepted = listOf(shortcut("a", press(ayn, y)), shortcut("b"), shortcut("c"))
+        val c = assertNotNull(ConflictDetector.conflict(accepted, shortcut("d")))
+        assertEquals("b", c.earlier.id)
+        assertEquals("d", c.later.id)
+    }
+
+    @Test
     fun `firstConflict is the first later shortcut that repeats any earlier one, in list order`() {
         val list = listOf(
             shortcut("a", press(ayn, x)),
