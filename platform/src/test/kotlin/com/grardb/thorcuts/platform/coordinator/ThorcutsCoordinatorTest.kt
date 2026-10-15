@@ -1,8 +1,12 @@
 package com.grardb.thorcuts.platform.coordinator
 
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
+import com.grardb.thorcuts.core.config.Defaults
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.EvdevType
+import com.grardb.thorcuts.core.model.ModifierKey
+import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.platform.config.MemoryConfigFile
 import com.grardb.thorcuts.platform.helper.FakeChannel
 import com.grardb.thorcuts.platform.helper.HelperChannel
@@ -17,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -291,5 +296,95 @@ class ThorcutsCoordinatorTest {
         assertIs<UpdateOutcome.Rejected>(outcome)
         assertEquals("config: write rejected: nope", c.state.value.configState)
         assertTrue(log.has("CONFIG_WRITE_REJECTED nope"))
+    }
+
+    // ── the recorder ──────────────────────────────────────────────────────────────────
+
+    private fun key(device: Int, code: Int, value: Int) =
+        HelperMessage.Event(device, EvdevType.KEY, code, value)
+
+    /** A coordinator with the helper up and ready: the state Record is offered in. */
+    private fun ready(): ThorcutsCoordinator {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(1))
+        return c
+    }
+
+    @Test
+    fun `startRecording puts the helper in capture mode and stopRecording takes it out, once`() {
+        val c = ready()
+        assertNull(c.recording.value)
+        c.startRecording()
+        assertEquals(TriggerRecorder(), c.recording.value)
+        assertEquals(listOf("start", "capture on"), channel.calls)
+        assertTrue(log.has("CAPTURE on"))
+        c.stopRecording()
+        assertNull(c.recording.value)
+        assertEquals(listOf("start", "capture on", "capture off"), channel.calls)
+        assertTrue(log.has("CAPTURE off"))
+        c.stopRecording()                                       // not recording: nothing sent
+        assertEquals(listOf("start", "capture on", "capture off"), channel.calls)
+    }
+
+    @Test
+    fun `events while recording become the trigger - AYN down, X down, X up, AYN up`() {
+        val c = ready()
+        c.startRecording()
+        channel.emit(key(1, 194, 1))                            // AYN, on gpio-keys
+        channel.emit(key(0, 307, 1))                            // X
+        assertEquals(setOf(ModifierKey.AYN.control, Defaults.X), c.recording.value!!.held)
+        channel.emit(key(0, 307, 0))
+        channel.emit(key(1, 194, 0))
+        val r = assertNotNull(c.recording.value)
+        assertTrue(r.complete)
+        assertEquals(setOf(ModifierKey.AYN), r.modifiers)
+        assertEquals(setOf(Defaults.X), r.buttons)
+        // The recording stays until the UI ends it; no row is written for a raw event.
+        assertEquals(listOf("start", "capture on"), channel.calls)
+        assertTrue(c.state.value.eventLog.none { it.startsWith("dev=") })
+    }
+
+    @Test
+    fun `an event while not recording changes nothing`() {
+        val c = ready()
+        val before = c.state.value
+        channel.emit(key(0, 307, 1))
+        assertNull(c.recording.value)
+        assertEquals(before, c.state.value)
+    }
+
+    @Test
+    fun `helperLive follows Ready and the loss, and a Ready mid-recording re-sends capture`() {
+        val c = coordinator()
+        assertFalse(c.state.value.helperLive)
+        c.setEnabled(true)
+        assertFalse(c.state.value.helperLive)                   // started, not yet ready
+        channel.emit(HelperMessage.Ready(1))
+        assertTrue(c.state.value.helperLive)
+        c.startRecording()
+        channel.emit(HelperMessage.Ready(1))                    // a session up mid-recording
+        assertEquals(listOf("start", "capture on", "capture on"), channel.calls)
+        assertTrue(c.state.value.helperLive)
+        channel.emit(HelperMessage.Log(HelperSupervisor.DISCONNECTED))
+        assertFalse(c.state.value.helperLive)
+    }
+
+    @Test
+    fun `a loss clears the recording with no send, by exit and by disconnect`() {
+        val losses = listOf(
+            HelperMessage.Exiting("signal"),
+            HelperMessage.Log(HelperSupervisor.DISCONNECTED),
+        )
+        for (loss in losses) {
+            val c = ready()
+            c.startRecording()
+            channel.emit(loss)
+            assertNull(c.recording.value)
+            assertFalse(c.state.value.helperLive)
+            assertEquals(listOf("start", "capture on"), channel.calls)    // no "capture off"
+            c.stopRecording()                                   // the UI's backstop: nothing
+            assertEquals(listOf("start", "capture on"), channel.calls)
+        }
     }
 }

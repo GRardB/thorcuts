@@ -5,6 +5,7 @@ import com.grardb.thorcuts.core.config.ConfigStore
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.FireResolution
 import com.grardb.thorcuts.platform.actions.ActionDispatcher
 import com.grardb.thorcuts.platform.helper.HelperChannel
@@ -18,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -45,6 +47,9 @@ data class CoordinatorState(
      * resurrected by that start returning.
      */
     val running: Boolean = false,
+    /** True between the helper's Ready and its loss: the one yes/no the editor's Record
+     *  button needs ([helperState]'s text is overwritten by every later line). */
+    val helperLive: Boolean = false,
     /** "starting…" / "stopping…" while a blocking start or stop is in flight — the switch
      *  button is disabled on it, and so is every other caller — and null otherwise. */
     val transition: String? = null,
@@ -87,6 +92,12 @@ data class CoordinatorState(
  * helper that goes away unasked releases the process and leaves the switch on, so the next
  * open or boot starts it again; the panic combo turns the switch off, because the user
  * asked for the controller back and nothing may re-grab it until they say so.
+ *
+ * The recorder. [startRecording] holds the helper in capture mode — every raw event comes up
+ * and feeds [recording], nothing but the panic goes out — exactly while [recording] is
+ * non-null; [stopRecording] ends it. A lost helper clears it. The editor's ViewModel ends a
+ * recording on the release, on close and on a timeout, so the gate never stays shut behind
+ * a screen that is gone.
  */
 class ThorcutsCoordinator(
     val gateway: PrivilegeGateway,
@@ -136,6 +147,15 @@ class ThorcutsCoordinator(
 
     private val _state = MutableStateFlow(CoordinatorState(enabled = switch.read()))
     val state: StateFlow<CoordinatorState> = _state.asStateFlow()
+
+    private val _recording = MutableStateFlow<TriggerRecorder?>(null)
+
+    /**
+     * The editor's recorder while it records, else null. The helper is in capture mode
+     * exactly while this is non-null — the one fact both sides keep. Fed on the supervisor's
+     * reader thread; read by the UI.
+     */
+    val recording: StateFlow<TriggerRecorder?> = _recording.asStateFlow()
 
     /**
      * Every write of the switch carries the epoch it was decided at and lands only if it is
@@ -223,6 +243,25 @@ class ThorcutsCoordinator(
             _state.update { it.copy(configState = "config: write rejected: ${outcome.reason}") }
         }
         return outcome
+    }
+
+    /**
+     * Start recording, or start over: a fresh recorder, and the helper asked for capture.
+     * From any thread. The send is queued on the privileged thread — a socket write, never
+     * on the caller's (the UI's is main) — and being queued on that single thread it stays
+     * in order with a stop queued after it. Dropped by the channel when nothing is connected.
+     */
+    fun startRecording() {
+        _recording.value = TriggerRecorder()
+        log.i("CAPTURE on")
+        privileged.launch { helper.setCapture(true) }
+    }
+
+    /** End the recording and reopen the gate. Nothing when not recording. */
+    fun stopRecording() {
+        if (_recording.getAndUpdate { null } == null) return
+        log.i("CAPTURE off")
+        privileged.launch { helper.setCapture(false) }
     }
 
     /**
@@ -352,8 +391,14 @@ class ThorcutsCoordinator(
         var stopping = false
         _state.update {
             stopping = it.transition == STOPPING
-            it.copy(running = false, helperState = helperState, tableState = NO_TABLE_NO_HELPER)
+            it.copy(
+                running = false, helperLive = false, helperState = helperState,
+                tableState = NO_TABLE_NO_HELPER,
+            )
         }
+        // Nothing left to listen to: the gate went with the helper, and the editor's
+        // recording block must not keep asking for a combo. No send — nothing is connected.
+        _recording.value = null
         if (!stopping) release()
     }
 
@@ -361,11 +406,16 @@ class ThorcutsCoordinator(
     private fun onHelperMessage(message: HelperMessage) {
         when (message) {
             is HelperMessage.Ready -> {
-                _state.update { it.copy(helperState = "ready, ${message.deviceCount} devices") }
+                val ready = "ready, ${message.deviceCount} devices"
+                _state.update { it.copy(helperLive = true, helperState = ready) }
                 // The store compiles the current config at the next generation and pushes
                 // it — on Ready, never earlier (HelperSupervisor.pushTable says why). A
                 // config that does not compile comes back as a PushFailed event.
                 store.helperReady()
+                // A helper that came up during a recording starts in match mode. The UI
+                // offers Record only while helperLive, so this guards a start that overlaps
+                // a recording, not the normal path.
+                if (_recording.value != null) privileged.launch { helper.setCapture(true) }
             }
             is HelperMessage.Log -> {
                 // The disconnect line is the one Log that means "no helper": it went away
@@ -390,10 +440,8 @@ class ThorcutsCoordinator(
                 lost("exited: ${message.reason}")
             }
             is HelperMessage.Fired -> store.fired(message.generation, message.index)
-            is HelperMessage.Event -> row(
-                "dev=${message.device} type=${message.type} " +
-                    "code=${message.code} value=${message.value}"
-            )
+            // Raw events arrive only in capture mode, and only the recorder wants them.
+            is HelperMessage.Event -> _recording.update { it?.feed(message) }
             is HelperMessage.TableAccepted -> {
                 val gen = message.generation
                 // `installed` is the helper's proof that nothing older than gen can fire

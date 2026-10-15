@@ -10,7 +10,8 @@ import com.grardb.thorcuts.core.rules.CompiledTable
  * built with.
  *
  * [start] and [stop] BLOCK — seconds, on the paths that assess and restore the pad — so
- * call them on Privilege.dispatcher. [pushTable] is thread-safe and returns at once.
+ * call them on Privilege.dispatcher. [pushTable] and [setCapture] are thread-safe and return
+ * at once.
  */
 interface HelperChannel {
 
@@ -43,4 +44,9 @@ interface HelperChannel {
 
     /** Send a compiled rule table. Call it on Ready and never earlier. */
     fun pushTable(table: CompiledTable)
+
+    /** Put the helper in capture mode — every raw event comes up as an Event and nothing but
+     *  the panic goes out — or back in match mode. Dropped with a log line when no helper is
+     *  connected; the coordinator re-sends on the next Ready. */
+    fun setCapture(on: Boolean)
 }

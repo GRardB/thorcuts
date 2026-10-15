@@ -12,7 +12,7 @@ import com.grardb.thorcuts.core.rules.CompiledTable
  */
 class FakeChannel(private val onMessage: (HelperMessage) -> Unit) : HelperChannel {
 
-    /** "start" and "stop", in order. */
+    /** "start", "stop", "capture on" and "capture off", in order. */
     val calls = mutableListOf<String>()
     val pushed = mutableListOf<CompiledTable>()
     var outcome = HelperChannel.Start.STARTED
@@ -32,6 +32,10 @@ class FakeChannel(private val onMessage: (HelperMessage) -> Unit) : HelperChanne
 
     override fun pushTable(table: CompiledTable) {
         pushed += table
+    }
+
+    override fun setCapture(on: Boolean) {
+        calls += if (on) "capture on" else "capture off"
     }
 
     fun emit(message: HelperMessage) = onMessage(message)

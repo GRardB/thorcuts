@@ -211,8 +211,8 @@ class HelperSupervisor(
         }
     }
 
-    fun setCaptureMode(capture: Boolean) {
-        send(if (capture) HelperCommand.ModeCapture else HelperCommand.ModeMatch)
+    override fun setCapture(on: Boolean) {
+        send(if (on) HelperCommand.ModeCapture else HelperCommand.ModeMatch)
     }
 
     /**
