@@ -197,10 +197,55 @@ static void warn_once(bool *flag, const char *what) {
     say("L WARNING %s — a control may be dead; stop the helper if input misbehaves", what);
 }
 
+/* What each twin currently holds, by the events apply() emitted: a key's down/up and an
+   axis's last value. Consulted by the capture gate for the one release a twin is owed. */
+static bool    g_twin_key_down[2][KEY_MAX + 1];
+static int32_t g_twin_axis[2][ABS_MAX + 1];
+
+static void note_emitted(tc_event ev) {
+    if (ev.dev >= 2) return;
+    if (ev.type == TC_EV_KEY && ev.code <= KEY_MAX) {
+        g_twin_key_down[ev.dev][ev.code] = ev.value != 0;
+    } else if (ev.type == TC_EV_ABS && ev.code <= ABS_MAX) {
+        g_twin_axis[ev.dev][ev.code] = ev.value;
+    }
+}
+
+/* A release the twin is OWED: a key or axis held from before the recording reached its twin
+   as a down (the twin's state says so), and dropping its up would leave it held in the game
+   until pressed again — a stuck button, the one state the gate must not create. A release
+   presses nothing and fires nothing, so letting it out keeps the point of the gate. Only a
+   forward, and only for a control the twin has down: a key pressed during the recording never
+   reached it, so its up is dropped like everything else. */
+static bool owed_release(tc_decision d) {
+    if (d.kind != TC_FORWARD || d.ev.value != 0 || d.ev.dev >= 2) return false;
+    if (d.ev.type == TC_EV_KEY) {
+        return d.ev.code <= KEY_MAX && g_twin_key_down[d.ev.dev][d.ev.code];
+    }
+    if (d.ev.type == TC_EV_ABS) {
+        return d.ev.code <= ABS_MAX && g_twin_axis[d.ev.dev][d.ev.code] != 0;
+    }
+    return false;
+}
+
 /* Execute one matcher decision against the virtual devices.
    Now that the real devices are grabbed, Android sees ONLY what is emitted here:
-   a missing FORWARD is a button that no longer works. */
-static void apply(tc_decision d, bool *out_panic, bool *out_dirty_pad, bool *out_dirty_gpio) {
+   a missing FORWARD is a button that no longer works.
+
+   While the app records a trigger (capture mode) nothing leaves the helper but the panic and
+   a release a twin is owed (owed_release): no forward, no synthesised tap, no fire. The matcher
+   is still fed every event and every tick, so the panic combo keeps working with the gate shut
+   and the matcher's picture of what is held stays true to the keys when the mode switches
+   back. Three things the gate does not undo, accepted: a key whose down never reached the twin
+   and whose up arrives after the switch back is a lone up there (an app generally ignores one);
+   an axis is owed its release only at exactly 0, so a stick still away from centre keeps its
+   twin there until it next moves; and a timed combo armed during capture fires if the mode
+   switches back before its deadline while it is still held — the normal switch back is on the
+   release, when nothing is held. */
+static void apply(tc_decision d, bool capture, bool *out_panic, bool *out_dirty_pad,
+                  bool *out_dirty_gpio) {
+    if (capture && d.kind != TC_PANIC && !owed_release(d)) return;
+
     tc_uinput *v = d.ev.dev == TC_DEV_GPIO ? &g_vgpio : &g_vpad;
     bool *dirty = d.ev.dev == TC_DEV_GPIO ? out_dirty_gpio : out_dirty_pad;
 
@@ -209,6 +254,7 @@ static void apply(tc_decision d, bool *out_panic, bool *out_dirty_pad, bool *out
         case TC_SYNTH:
             if (tc_uinput_emit(v, d.ev.type, d.ev.code, d.ev.value) == 0) {
                 *dirty = true;
+                note_emitted(d.ev);
             } else {
                 static bool warned_emit = false;
                 warn_once(&warned_emit, "emit to a virtual device failed");
@@ -462,7 +508,9 @@ int main(int argc, char **argv) {
 
     int64_t last_ping = now_ms();
     int64_t deadline = -1;
-    bool capture = true;  /* M1 streams events so the diagnostics screen shows them */
+    /* Match mode until the app's editor asks for capture (`M capture`): a fresh helper never
+       swallows on its own, and outside a recording the socket carries no `E` lines. */
+    bool capture = false;
 
     for (;;) {
         if (g_signalled) leave("signal");
@@ -508,8 +556,9 @@ int main(int argc, char **argv) {
                 } else if (line[0] == 'S') {
                     leave("stop requested");
                 } else if (line[0] == 'M') {
+                    /* Silent, like `P`: the app logs what it sent, and an `L` here would
+                       show over the "ready" line on its screen. */
                     capture = strstr(line, "capture") != NULL;
-                    say("L mode %s", capture ? "capture" : "match");
                 } else if (line[0] == 'T') {
                     handle_table(line);
                 }
@@ -559,7 +608,7 @@ int main(int argc, char **argv) {
                 tc_out out = tc_step(&g_matcher, ev, now_ms());
                 deadline = out.deadline_ms;
                 for (uint8_t k = 0; k < out.n; k++) {
-                    apply(out.items[k], &panic, &dirty_pad, &dirty_gpio);
+                    apply(out.items[k], capture, &panic, &dirty_pad, &dirty_gpio);
                 }
             }
             /* One report per batch, per device that actually emitted something. */
@@ -586,7 +635,7 @@ int main(int argc, char **argv) {
             bool dirty_pad = false;
             bool dirty_gpio = false;
             for (uint8_t k = 0; k < out.n; k++) {
-                apply(out.items[k], &panic, &dirty_pad, &dirty_gpio);
+                apply(out.items[k], capture, &panic, &dirty_pad, &dirty_gpio);
             }
             if (dirty_pad && tc_uinput_syn(&g_vpad) != 0) {
                 static bool warned = false;
