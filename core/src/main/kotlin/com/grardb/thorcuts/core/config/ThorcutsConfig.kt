@@ -33,6 +33,26 @@ data class ThorcutsConfig(
      *  [id] is absent. */
     fun withEnabled(id: String, enabled: Boolean): ThorcutsConfig =
         copy(shortcuts = shortcuts.map { if (it.id == id) it.copy(enabled = enabled) else it })
+
+    /** The same list with [shortcut] appended. A repeated id, or a repeated trigger where
+     *  both apply, is refused by `init` — the store reports it as a rejected write. */
+    fun added(shortcut: Shortcut): ThorcutsConfig = copy(shortcuts = shortcuts + shortcut)
+
+    /** The same list with the shortcut of [shortcut]'s id replaced in place. An absent id is
+     *  refused: the editor replaces what it opened, and silently appending would hide a
+     *  shortcut that went away under it. */
+    fun replaced(shortcut: Shortcut): ThorcutsConfig {
+        require(shortcuts.any { it.id == shortcut.id }) {
+            "no shortcut '${shortcut.id}' to replace"
+        }
+        return copy(shortcuts = shortcuts.map { if (it.id == shortcut.id) shortcut else it })
+    }
+
+    /** The same list without the shortcut [id], and without the unknown members the file
+     *  kept under that id — they are keyed by it and would otherwise outlive it (config spec,
+     *  T2-4). The same config when [id] is absent. */
+    fun without(id: String): ThorcutsConfig =
+        copy(shortcuts = shortcuts.filter { it.id != id }, unknown = unknown.without(id))
 }
 
 /**
@@ -48,6 +68,9 @@ class UnknownFields internal constructor(
     internal val perShortcut: Map<String, Map<String, JsonElement>>,
 ) {
     val isEmpty: Boolean get() = top.isEmpty() && perShortcut.isEmpty()
+
+    /** The same members without those kept under the shortcut [id]. */
+    internal fun without(id: String): UnknownFields = UnknownFields(top, perShortcut - id)
 
     override fun equals(other: Any?): Boolean =
         other is UnknownFields && top == other.top && perShortcut == other.perShortcut

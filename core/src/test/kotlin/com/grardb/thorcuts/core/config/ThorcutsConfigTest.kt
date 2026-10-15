@@ -10,6 +10,7 @@ import com.grardb.thorcuts.core.model.TriggerStyle
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -67,6 +68,54 @@ class ThorcutsConfigTest {
         val c = ThorcutsConfig(listOf(shortcut("a")))
         assertEquals(c, c.withEnabled("zzz", false))
         assertNull(c.shortcut("zzz"))
+    }
+
+    @Test
+    fun `added appends and keeps the rest, unknown members included`() {
+        val c = ThorcutsConfig(listOf(shortcut("a")))
+        val more = c.added(shortcut("b"))
+        assertEquals(listOf("a", "b"), more.shortcuts.map { it.id })
+        assertEquals(shortcut("a"), more.shortcut("a"))
+        assertEquals(c.unknown, more.unknown)
+    }
+
+    @Test
+    fun `added with a repeated id, or a repeated trigger where both apply, is refused`() {
+        val c = ThorcutsConfig(listOf(twin("a")))
+        val byId = assertFailsWith<IllegalArgumentException> { c.added(shortcut("a")) }
+        assertTrue("ids repeat" in byId.message!!, byId.message)
+        val byTrigger = assertFailsWith<IllegalArgumentException> { c.added(twin("b")) }
+        assertEquals("'b' repeats the trigger of 'a' everywhere", byTrigger.message)
+        c.added(twin("b", enabled = false))                                // parked: fine
+    }
+
+    @Test
+    fun `replaced changes the one entry in place, and refuses an id that is not there`() {
+        val c = ThorcutsConfig(listOf(shortcut("a"), shortcut("b")))
+        val edited = shortcut("a", enabled = false)
+        val r = c.replaced(edited)
+        assertEquals(listOf(edited, shortcut("b")), r.shortcuts)
+        assertEquals(c.unknown, r.unknown)
+        val e = assertFailsWith<IllegalArgumentException> { c.replaced(shortcut("zzz")) }
+        assertEquals("no shortcut 'zzz' to replace", e.message)
+    }
+
+    @Test
+    fun `without removes the entry and the unknown members the file kept under its id`() {
+        val read = ConfigCodec.decode(configFixture("kitchen-sink.json"))
+        val c = assertIs<DecodeResult.Ok>(read).config
+        assertEquals(setOf("close-in-emulators"), c.unknown.perShortcut.keys)   // its `note`
+        val less = c.without("close-in-emulators")
+        assertNull(less.shortcut("close-in-emulators"))
+        assertEquals(c.shortcuts.size - 1, less.shortcuts.size)
+        assertTrue(less.unknown.perShortcut.isEmpty())
+        assertEquals(c.unknown.top, less.unknown.top)                           // `theme` stays
+    }
+
+    @Test
+    fun `without of an absent id is the same config`() {
+        val c = ThorcutsConfig(listOf(shortcut("a")))
+        assertEquals(c, c.without("zzz"))
     }
 
     @Test
