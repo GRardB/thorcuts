@@ -53,6 +53,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // Host tests for the app's pure logic (FocusedWindow, EditorDraft): a plain JVM, JUnit 5
+    // as in :core and :platform. The classes under test import nothing from android.*.
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
+    }
 }
 
 dependencies {
@@ -60,6 +66,9 @@ dependencies {
     implementation(project(":platform"))
 
     implementation("androidx.core:core-ktx:1.19.1")
+    // Dispatchers.Main.immediate for ThorcutsApp.writes (the editor's final review, E7-3):
+    // declared here, not left to arrive transitively through :core / :platform.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
@@ -70,4 +79,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.20")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

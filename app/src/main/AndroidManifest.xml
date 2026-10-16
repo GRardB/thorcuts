@@ -58,6 +58,23 @@
                 android:value="Keeps the controller-shortcut helper alive with no screen open" />
         </service>
 
+        <!-- The foreground-app monitor: an accessibility service the user enables once in
+             Settings; it reports which app holds input focus so the rule table can be per-app
+             (M4). exported with the BIND_ACCESSIBILITY_SERVICE permission is the required
+             shape: only the system holds that permission. -->
+        <service
+            android:name=".ForegroundAppMonitor"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/foreground_monitor" />
+        </service>
+
         <!-- Not exported: BOOT_COMPLETED is a protected broadcast the system sends, and root
              and system uids pass the component check regardless. UNVERIFIED on this ROM until
              the holder's device run; the fallback is exported="true". -->

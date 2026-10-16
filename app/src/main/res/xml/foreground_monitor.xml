@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The foreground-app monitor's config. flagRetrieveInteractiveWindows is what
+     getWindowsOnAllDisplays() needs, and Android ignores it unless canRetrieveWindowContent
+     is declared; notificationTimeout 0 so a window change is reported at once. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/monitor_description"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="0" />

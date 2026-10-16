@@ -3,4 +3,5 @@
     <string name="status_channel">Thorcuts status</string>
     <string name="status_title">Thorcuts is on</string>
     <string name="status_text">Controller shortcuts are active. Tap to open.</string>
+    <string name="monitor_description">Lets Thorcuts see which app is in front on each screen, so a shortcut can apply only in the apps you choose. Thorcuts reads nothing else.</string>
 </resources>
