@@ -11,10 +11,11 @@ package com.grardb.thorcuts.platform.privilege
  */
 interface PrivilegeGateway {
 
-    /** Human-readable name, for the diagnostics screen. */
+    /** Human-readable name, for logs and the device runs; nothing renders it since M3. */
     val name: String
 
-    /** True if this gateway is reachable and runs our commands as uid 0. */
+    /** True if this gateway is reachable and runs our commands as uid 0. A device-run
+     *  diagnostic since M3: nothing in the app calls it. */
     fun probe(): Boolean
 
     /** Run [command], returning its stdout, or null if the call failed. */

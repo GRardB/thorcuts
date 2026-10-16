@@ -47,6 +47,8 @@ interface HelperChannel {
 
     /** Put the helper in capture mode — every raw event comes up as an Event and nothing but
      *  the panic goes out — or back in match mode. Dropped with a log line when no helper is
-     *  connected; the coordinator re-sends on the next Ready. */
+     *  connected; the coordinator re-sends `capture on` on the next Ready while a recording is
+     *  still open, and a dropped `capture off` need not be re-sent: a fresh helper starts in
+     *  match mode. */
     fun setCapture(on: Boolean)
 }

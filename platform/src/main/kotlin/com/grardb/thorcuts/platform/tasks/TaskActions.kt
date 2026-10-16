@@ -33,7 +33,8 @@ class TaskActions(
     private val thorcutsMainArg: String = CommandSafety.componentArg(thorcutsMain)
         ?: throw IllegalArgumentException("not a component name: '$thorcutsMain'")
 
-    /** Every task with its display and visibility, plus the focused one, for diagnostics. */
+    /** Every task with its display and visibility, plus the focused one, for diagnostics;
+     *  since M3 nothing in the app calls it (the device runs use the tool's `list`). */
     fun listTasks(): String = tool("list")
 
     /**

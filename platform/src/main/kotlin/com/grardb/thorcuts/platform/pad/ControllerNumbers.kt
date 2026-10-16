@@ -74,7 +74,7 @@ object ControllerNumbers {
      *
      *  - the teardown backstop fires a gratuitous restore after EVERY normal
      *    takeover, blinking the user's controller out again for ~3 s and, because
-     *    DiagnosticsViewModel keeps a single message slot, overwriting the
+     *    CoordinatorState.helperState is a single message slot, overwriting the
      *    helper's "RESTORE FAILED …" warning with "pad left renumbered";
      *  - the launch decision reads RESTORE instead of TAKE_OVER right after the
      *    self-heal's own restore, so the run that needed healing launches the

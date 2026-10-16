@@ -216,7 +216,10 @@ static void note_emitted(tc_event ev) {
    until pressed again — a stuck button, the one state the gate must not create. A release
    presses nothing and fires nothing, so letting it out keeps the point of the gate. Only a
    forward, and only for a control the twin has down: a key pressed during the recording never
-   reached it, so its up is dropped like everything else. */
+   reached it, so its up is dropped like everything else. A forward is enough to look at
+   because matcher.c swallows an up only when it swallowed the down (button_up's and
+   handle_modifier's fired branches): every up a twin is owed arrives as TC_FORWARD. If that
+   ever changes, a key can stick. */
 static bool owed_release(tc_decision d) {
     if (d.kind != TC_FORWARD || d.ev.value != 0 || d.ev.dev >= 2) return false;
     if (d.ev.type == TC_EV_KEY) {
@@ -239,9 +242,9 @@ static bool owed_release(tc_decision d) {
    back. Three things the gate does not undo, accepted: a key whose down never reached the twin
    and whose up arrives after the switch back is a lone up there (an app generally ignores one);
    an axis is owed its release only at exactly 0, so a stick still away from centre keeps its
-   twin there until it next moves; and a timed combo armed during capture fires if the mode
-   switches back before its deadline while it is still held — the normal switch back is on the
-   release, when nothing is held. */
+   twin there until the axis reads 0 or the mode switches back; and a timed combo armed during
+   capture fires if the mode switches back before its deadline while it is still held — the
+   normal switch back is on the release, when nothing is held. */
 static void apply(tc_decision d, bool capture, bool *out_panic, bool *out_dirty_pad,
                   bool *out_dirty_gpio) {
     if (capture && d.kind != TC_PANIC && !owed_release(d)) return;
@@ -498,8 +501,8 @@ int main(int argc, char **argv) {
     /* Count what is actually OPEN at the moment of reporting rather than carrying
        the startup tally forward. `opened` goes stale in both directions once a
        takeover is in play: tc_takeover closes the pad on every failure but its
-       first two, and the reopen above may or may not get it back. The diagnostics
-       screen shows this number to the user as readiness ("ready, N devices"), so
+       first two, and the reopen above may or may not get it back. The app's main
+       screen shows this number as its first status line ("ready, N devices"), so
        it has to be the truth. Nothing can be grabbed-but-closed here: a failed
        grab leaves through leave(). */
     say("R %d", (g_pad.fd >= 0 ? 1 : 0) + (g_gpio.fd >= 0 ? 1 : 0));

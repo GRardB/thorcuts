@@ -331,6 +331,7 @@ class ThorcutsCoordinatorTest {
     fun `events while recording become the trigger - AYN down, X down, X up, AYN up`() {
         val c = ready()
         c.startRecording()
+        val before = c.state.value
         channel.emit(key(1, 194, 1))                            // AYN, on gpio-keys
         channel.emit(key(0, 307, 1))                            // X
         assertEquals(setOf(ModifierKey.AYN.control, Defaults.X), c.recording.value!!.held)
@@ -340,9 +341,10 @@ class ThorcutsCoordinatorTest {
         assertTrue(r.complete)
         assertEquals(setOf(ModifierKey.AYN), r.modifiers)
         assertEquals(setOf(Defaults.X), r.buttons)
-        // The recording stays until the UI ends it; no row is written for a raw event.
+        // The recording stays until the UI ends it; a raw event touches the recorder and
+        // nothing else — not a row, not a line of the state.
         assertEquals(listOf("start", "capture on"), channel.calls)
-        assertTrue(c.state.value.eventLog.none { it.startsWith("dev=") })
+        assertEquals(before, c.state.value)
     }
 
     @Test

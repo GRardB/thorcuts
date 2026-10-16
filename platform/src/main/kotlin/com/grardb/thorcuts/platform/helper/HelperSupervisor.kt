@@ -197,8 +197,8 @@ class HelperSupervisor(
         // sampling immediately, would see "no pad at all", call it RESTORE and
         // cycle the key again: a second gratuitous 3 s blackout after EVERY normal
         // takeover, whose "pad left renumbered" line would also overwrite the
-        // helper's "RESTORE FAILED …" warning in DiagnosticsViewModel's single
-        // message slot. That warning is the one this whole task exists to deliver.
+        // helper's "RESTORE FAILED …" warning in CoordinatorState.helperState's
+        // single message slot. That warning is the one this whole task exists to deliver.
         val after = ControllerNumbers.assessAfterSettle()
         Log.i(TAG, "PAD_ASSESS stop action=${after.action} why=${after.why}")
         if (after.action == PadAction.RESTORE) {
@@ -308,7 +308,7 @@ class HelperSupervisor(
                 // still read "exited: panic combo".
                 //
                 // Deliberately silent. serve()'s finally has just reported the
-                // real reason, and DiagnosticsViewModel keeps ONE message slot, so
+                // real reason, and CoordinatorState.helperState is ONE message slot, so
                 // anything said here would overwrite "exited: panic combo" with
                 // bookkeeping. The user sees why it stopped; Start simply works
                 // again.

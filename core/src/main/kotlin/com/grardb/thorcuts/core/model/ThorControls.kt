@@ -40,6 +40,7 @@ object ThorControls {
             control.type == EvdevType.KEY && control.device == Device.PAD ->
                 PAD_KEYS[control.code] ?: "key ${control.code}"
             control.type == EvdevType.KEY -> GPIO_KEYS[control.code] ?: "key ${control.code}"
+            // The D-pad by its axis code alone: gpio-keys emits no ABS.
             control.code == HAT0X -> if (control.value < 0) "D-pad left" else "D-pad right"
             control.code == HAT0Y -> if (control.value < 0) "D-pad up" else "D-pad down"
             else -> "axis ${control.code} at ${control.value}"

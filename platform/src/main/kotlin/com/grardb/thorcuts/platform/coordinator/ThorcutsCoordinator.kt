@@ -34,9 +34,11 @@ private const val STOPPING = "stopping…"
 private const val PANIC = "panic combo"
 
 /**
- * What the holder shows: the rows the diagnostics screen renders, plus the switch and
- * whether the helper runs. Held by [ThorcutsCoordinator] for the life of the process, so a
- * screen closed and reopened reads the same state and the same log.
+ * What the holder shows: the switch and its transition, whether the helper runs and is live,
+ * the three status lines the main screen renders, and its own record — [lastOutcome] and
+ * [eventLog], rendered by nothing since the diagnostics screen went (the editor spec's
+ * decision) and asserted by its tests. Held by [ThorcutsCoordinator] for the life of the
+ * process, so a screen closed and reopened reads the same state and the same log.
  */
 data class CoordinatorState(
     /** The persisted switch: shortcuts are wanted on. */
@@ -70,8 +72,8 @@ data class CoordinatorState(
  * Parent spec §7's owner "above the screen" and §12's `ThorcutsCoordinator`: the one holder
  * of everything with a lifetime — the gateway, the actions, the dispatcher, the helper
  * channel, the config store, the persisted switch — built once per process by the
- * Application and never torn down. The diagnostics ViewModel is a view of [state]; M3's
- * editor edits through [update]. Nothing here imports `android.*`: every Android touchpoint
+ * Application and never torn down. `ThorcutsViewModel` is a view of [state] and [config];
+ * the editor edits through [update]. Nothing here imports `android.*`: every Android touchpoint
  * arrives through a constructor argument, so the whole bookkeeping runs on the host.
  *
  * Threading, unchanged from the ViewModel this replaces: the helper's messages arrive on
@@ -226,8 +228,8 @@ class ThorcutsCoordinator(
 
     /**
      * Perform [action] now, on the calling thread — Privilege.dispatcher, as every
-     * [TaskActions] call requires — and record its outcome as `<line> (<label>)`. Fires
-     * call it with the shortcut's id; the diagnostics screen's Swap button with "swap".
+     * [TaskActions] call requires — and record its outcome as `<line> (<label>)`. A fire
+     * calls it with the shortcut's id.
      */
     fun run(action: Action, label: String): String {
         val outcome = dispatcher.dispatch(action)
@@ -247,9 +249,11 @@ class ThorcutsCoordinator(
 
     /**
      * Start recording, or start over: a fresh recorder, and the helper asked for capture.
-     * From any thread. The send is queued on the privileged thread — a socket write, never
-     * on the caller's (the UI's is main) — and being queued on that single thread it stays
-     * in order with a stop queued after it. Dropped by the channel when nothing is connected.
+     * The state write and the queued send are not one step, so every start and stop must come
+     * from ONE thread — the UI's main, as every caller does; [lost] is the one other writer
+     * and sends nothing. The send is queued on the privileged thread — a socket write, never
+     * on the caller's — and being queued on that single thread it stays in order with a stop
+     * queued after it. Dropped by the channel when nothing is connected.
      */
     fun startRecording() {
         _recording.value = TriggerRecorder()

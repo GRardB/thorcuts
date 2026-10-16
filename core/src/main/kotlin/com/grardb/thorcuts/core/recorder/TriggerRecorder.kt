@@ -43,6 +43,8 @@ data class TriggerRecorder(
                 else -> this                                            // 2: autorepeat
             }
             EvdevType.ABS -> {
+                // The D-pad by its axis code alone: gpio-keys emits no ABS, so the device
+                // need not be checked (ThorControls.name leans on the same fact).
                 if (event.code !in ThorControls.DPAD_AXES) return this
                 // One axis, two directions: whichever was held is released by any new
                 // value, and a non-zero value is the down of that direction.
