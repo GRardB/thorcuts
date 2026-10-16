@@ -17,8 +17,10 @@ import java.io.OutputStream
 
 /**
  * Owns the app's side of the helper channel: hosts the socket, launches the
- * helper as uid 0, pings it, and reads what it says. The [HelperChannel] the
- * coordinator holds; built once per process.
+ * helper as uid 0, pings it, and reads what it says — one session at a time: a
+ * session this supervisor has moved past (a [stop] that timed out with the
+ * helper still on its socket, then a new [start]) is never heard again, see
+ * [session]. The [HelperChannel] the coordinator holds; built once per process.
  */
 class HelperSupervisor(
     private val appContext: Context,
@@ -36,7 +38,18 @@ class HelperSupervisor(
     @Volatile private var pinger: Thread? = null
 
     /**
-     * Bind the socket, then launch the helper. Call on Privilege.dispatcher. NOT_BOUND only
+     * Bumped by every start(). The accept thread (which is the reader), the ping thread and
+     * serve() capture theirs and stand down when it is no longer the current one, so a line,
+     * a disconnect, a teardown or a ping from a session this supervisor has moved past never
+     * reaches the coordinator or touches the new session's fields. Written on the privileged
+     * thread only; read by the session threads.
+     */
+    @Volatile private var session = 0
+
+    /**
+     * Bind the socket, then launch the helper. Call on Privilege.dispatcher: BLOCKING — up
+     * to [SESSION_WAIT_MS] (8 s) for a dying session, then the settle
+     * ([ControllerNumbers.SETTLE_WAIT_MS]) and the launch script's second. NOT_BOUND only
      * when the socket could not be bound (a launch that fails says so as a message);
      * ALREADY_RUNNING only when a dying session has not ended within [SESSION_WAIT_MS] —
      * its terminal message reaches the coordinator seconds before its socket closes, and
@@ -69,6 +82,7 @@ class HelperSupervisor(
         }
         running = true
         stopRequested = false
+        val mine = ++session
 
         // Self-heal. This covers a SIGKILL of the helper, a crash mid-takeover, a
         // restore that never landed — the cases where the helper's own teardown
@@ -127,8 +141,12 @@ class HelperSupervisor(
         }
         server = ss
 
-        Thread({ acceptLoop(ss) }, "thorcuts-helper-accept").apply { isDaemon = true }.start()
-        pinger = Thread(::pingLoop, "thorcuts-helper-ping").apply { isDaemon = true; start() }
+        Thread({ acceptLoop(ss, mine) }, "thorcuts-helper-accept").apply { isDaemon = true }
+            .start()
+        pinger = Thread({ pingLoop(mine) }, "thorcuts-helper-ping").apply {
+            isDaemon = true
+            start()
+        }
 
         launch()
         return HelperChannel.Start.STARTED
@@ -320,17 +338,19 @@ class HelperSupervisor(
         }
     }
 
-    private fun acceptLoop(ss: LocalServerSocket) {
-        while (running) {
+    /** [mine] is the session this thread serves: once a later start() has moved past it,
+     *  the fields below belong to that session and this thread only returns. */
+    private fun acceptLoop(ss: LocalServerSocket, mine: Int) {
+        while (running && mine == session) {
             val client = try {
                 ss.accept()
             } catch (t: Throwable) {
-                if (running) Log.w(TAG, "accept: ${t.message}")
+                if (running && mine == session) Log.w(TAG, "accept: ${t.message}")
                 return
             }
-            serve(client)
+            serve(client, mine)
 
-            if (running) {
+            if (running && mine == session) {
                 // The helper went away without us asking: the panic combo, its
                 // watchdog, a crash, a kill. Nothing is going to reconnect, so
                 // tear the session down here rather than looping back into
@@ -356,6 +376,8 @@ class HelperSupervisor(
                 // race the close. The pinger is interrupted rather than left to notice the
                 // flag — it may not within its one-second sleep, and the relaunch sets the
                 // flag true again; left alone, one more pinger per relaunch would outlive it.
+                // (A thread whose session a later start() has moved past never gets here:
+                // `server`, `pinger` and `running` are that session's — the guard above.)
                 try { ss.close() } catch (_: Throwable) {}
                 server = null
                 pinger?.interrupt()
@@ -366,7 +388,10 @@ class HelperSupervisor(
         }
     }
 
-    private fun serve(client: LocalSocket) {
+    /** [mine] as in [acceptLoop]: a line read after a later start() has moved past this
+     *  session is dropped, never delivered — the coordinator hears one session at a time —
+     *  and the teardown below leaves the new session's fields alone. */
+    private fun serve(client: LocalSocket, mine: Int) {
         // Abstract sockets have NO file permissions, so this check is the only thing
         // standing between our channel and any other app on the device. Without it,
         // anything installed here could connect and inject controller events.
@@ -390,8 +415,12 @@ class HelperSupervisor(
         var sawExit = false
         try {
             val reader = client.inputStream.bufferedReader()
-            while (running) {
+            while (running && mine == session) {
                 val line = reader.readLine() ?: break
+                if (mine != session) {
+                    Log.i(TAG, "stale session $mine: dropped ${line.take(1)}")
+                    break
+                }
                 val message = HelperProtocol.parse(line)
                 if (message == null) {
                     Log.w(TAG, "unparsed line: $line")
@@ -403,15 +432,19 @@ class HelperSupervisor(
         } catch (t: Throwable) {
             Log.w(TAG, "read: ${t.message}")
         } finally {
-            connected = false
-            out = null
+            if (mine == session) {
+                connected = false
+                out = null
+            }
             runCatching { client.close() }
-            if (!sawExit) onMessage(HelperMessage.Log(DISCONNECTED))
+            if (mine == session && !sawExit) onMessage(HelperMessage.Log(DISCONNECTED))
         }
     }
 
-    private fun pingLoop() {
-        while (running) {
+    /** [mine] as in [acceptLoop]: a pinger whose session has been moved past returns (the
+     *  relaunch review, R1-3); the interrupt on teardown is what ends it promptly. */
+    private fun pingLoop(mine: Int) {
+        while (running && mine == session) {
             if (connected) send(HelperCommand.Ping)
             try {
                 Thread.sleep(PING_INTERVAL_MS)
