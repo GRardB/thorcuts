@@ -74,6 +74,11 @@ data class CoordinatorState(
     val lastOutcome: String = "",
     /** Newest first, [LOG_ROWS] rows. */
     val eventLog: List<String> = emptyList(),
+    /** The accessibility service is connected: the app in front is being reported (M4). */
+    val monitor: Boolean = false,
+    /** The package of the app that holds input focus, or null: no monitor, nothing focused,
+     *  or not known yet. */
+    val foreground: String? = null,
 )
 
 /**
@@ -252,6 +257,26 @@ class ThorcutsCoordinator(
                 d.verdict.name.lowercase()
         )
         if (d.verdict == Verdict.START) begin()
+    }
+
+    /** The accessibility service connected or went away (ForegroundAppMonitor). On the main
+     *  thread, as the service calls it; returns at once. */
+    fun monitor(connected: Boolean) {
+        log.i("MONITOR ${if (connected) "connected" else "disconnected"}")
+        _state.update { it.copy(monitor = connected) }
+    }
+
+    /**
+     * The app that holds input focus changed, or is unknown (null: no monitor, nothing
+     * focused, or not yet known). On the main thread; logged on a change only. The store
+     * recompiles for [packageName] on its own thread and pushes only when the selected list
+     * changed, so an app switch that changes no rule costs nothing.
+     */
+    fun foreground(packageName: String?) {
+        if (_state.value.foreground == packageName) return
+        log.i("FOREGROUND ${packageName ?: "unknown"}")
+        _state.update { it.copy(foreground = packageName) }
+        store.foreground(packageName)
     }
 
     /**

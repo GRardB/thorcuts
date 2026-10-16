@@ -10,6 +10,7 @@ import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
 import com.grardb.thorcuts.core.model.ModifierKey
+import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
@@ -171,7 +172,7 @@ class ThorcutsCoordinatorTest {
     }
 
     @Test
-    fun `a helper lost during the start is relaunched by an attempt queued behind it`() {
+    fun `a helper lost during the start is relaunched by a second attempt`() {
         val c = coordinator()
         var starts = 0
         channel.onStart = {
@@ -338,7 +339,7 @@ class ThorcutsCoordinatorTest {
         assertTrue(log.has("SWITCH on=false by=gave-up"))
         assertEquals("GAVE UP: exited: signal", c.state.value.eventLog.first())
         val off = log.lines.indexOfFirst { "SWITCH on=false by=gave-up" in it }
-        val release = log.lines.indexOfLast { "KEEPER release" in it }
+        val release = log.lines.indexOfFirst { "KEEPER release" in it }
         assertTrue(off in 0 until release)                      // persisted before the release
         c.ensureRunning()                                       // off: nothing starts
         assertEquals(listOf("start", "start"), channel.calls)
@@ -394,7 +395,7 @@ class ThorcutsCoordinatorTest {
         assertTrue(log.has("RELAUNCH gave up: could not bind the helper socket"))
         assertTrue(log.has("SWITCH on=false by=gave-up"))
         val off = log.lines.indexOfFirst { "SWITCH on=false by=gave-up" in it }
-        val release = log.lines.indexOfLast { "KEEPER release" in it }
+        val release = log.lines.indexOfFirst { "KEEPER release" in it }
         assertTrue(off in 0 until release)                      // persisted before the release
     }
 
@@ -434,6 +435,51 @@ class ThorcutsCoordinatorTest {
         assertIs<UpdateOutcome.Rejected>(outcome)
         assertEquals("config: write rejected: nope", c.state.value.configState)
         assertTrue(log.has("CONFIG_WRITE_REJECTED nope"))
+    }
+
+    // ── the app in front (M4) ─────────────────────────────────────────────────────────
+
+    private val dolphin = "org.dolphinemu.dolphinemu"
+
+    /** A coordinator whose config is the default swap (global) plus one shortcut only in
+     *  Dolphin: the global list is one rule, Dolphin's is two. */
+    private fun scopedCoordinator(): ThorcutsCoordinator {
+        val onlyDolphin = Defaults.SWAP_SCREENS.copy(
+            id = "only-d",
+            trigger = Defaults.SWAP_SCREENS.trigger.copy(
+                buttons = setOf(Control(Device.PAD, EvdevType.KEY, 304, 1)),
+            ),
+            scope = Scope.Apps(setOf(dolphin)),
+        )
+        file.text = ConfigCodec.encode(ThorcutsConfig(listOf(Defaults.SWAP_SCREENS, onlyDolphin)))
+        return coordinator()
+    }
+
+    @Test
+    fun `foreground is logged once per change, shown, and pushes that app's list`() {
+        val c = scopedCoordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(1))
+        assertEquals(listOf(1), channel.pushed.map { it.ruleCount })    // global: one rule
+        c.foreground(dolphin)
+        c.foreground(dolphin)                                           // no change
+        assertEquals(dolphin, c.state.value.foreground)
+        assertEquals(1, log.lines.count { "FOREGROUND $dolphin" in it })
+        assertEquals(listOf(1, 2), channel.pushed.map { it.ruleCount })
+        c.foreground(null)
+        assertTrue(log.has("FOREGROUND unknown"))
+        assertEquals(listOf(1, 2, 1), channel.pushed.map { it.ruleCount })
+    }
+
+    @Test
+    fun `monitor connected and disconnected are logged and shown`() {
+        val c = coordinator()
+        c.monitor(true)
+        assertTrue(c.state.value.monitor)
+        assertTrue(log.has("MONITOR connected"))
+        c.monitor(false)
+        assertFalse(c.state.value.monitor)
+        assertTrue(log.has("MONITOR disconnected"))
     }
 
     // ── the branches no test exercised (H3-5) ─────────────────────────────────────────
