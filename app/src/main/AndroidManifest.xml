@@ -20,6 +20,11 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.SECONDARY_HOME" />
         </intent>
+        <!-- The app picker (M4) lists every launcher app by name. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application

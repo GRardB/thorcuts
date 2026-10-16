@@ -1,0 +1,111 @@
+package com.grardb.thorcuts
+
+import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.Control
+import com.grardb.thorcuts.core.model.Device
+import com.grardb.thorcuts.core.model.EvdevType
+import com.grardb.thorcuts.core.model.ModifierKey
+import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.Shortcut
+import com.grardb.thorcuts.core.model.Trigger
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+class EditorDraftTest {
+
+    private val x = Control(Device.PAD, EvdevType.KEY, 307, 1)
+
+    private fun base(scope: ScopeKind = ScopeKind.EVERYWHERE, apps: Set<String> = emptySet()) =
+        EditorDraft(
+            id = "s",
+            modifiers = setOf(ModifierKey.AYN),
+            buttons = setOf(x),
+            scope = scope,
+            apps = apps,
+        )
+
+    @Test
+    fun `everywhere round-trips to a plain global`() {
+        val s = base().toShortcut()
+        assertEquals(Scope.Global(), s.scope)
+        assertEquals(ScopeKind.EVERYWHERE, EditorDraft.of(s).scope)
+    }
+
+    @Test
+    fun `except round-trips to a global with those exclusions`() {
+        val s = base(ScopeKind.EXCEPT, setOf("com.b", "com.a")).toShortcut()
+        assertEquals(Scope.Global(setOf("com.a", "com.b")), s.scope)
+        val d = EditorDraft.of(s)
+        assertEquals(ScopeKind.EXCEPT, d.scope)
+        assertEquals(setOf("com.a", "com.b"), d.apps)
+    }
+
+    @Test
+    fun `only-in round-trips to an app list`() {
+        val s = base(ScopeKind.ONLY, setOf("com.a")).toShortcut()
+        assertEquals(Scope.Apps(setOf("com.a")), s.scope)
+        val d = EditorDraft.of(s)
+        assertEquals(ScopeKind.ONLY, d.scope)
+        assertEquals(setOf("com.a"), d.apps)
+    }
+
+    @Test
+    fun `except or only with no app chosen is refused`() {
+        for (kind in listOf(ScopeKind.EXCEPT, ScopeKind.ONLY)) {
+            val e = assertFailsWith<IllegalArgumentException> { base(kind).toShortcut() }
+            assertEquals("choose at least one app", e.message)
+        }
+    }
+
+    @Test
+    fun `the enabled flag is kept and the id trimmed`() {
+        val original = Shortcut(
+            "keep", Trigger(setOf(ModifierKey.AYN), setOf(x)), Action.SwapScreens, enabled = false,
+        )
+        val s = EditorDraft.of(original).copy(id = "  keep  ").toShortcut()
+        assertEquals("keep", s.id)
+        assertFalse(s.enabled)
+    }
+
+    @Test
+    fun `a non-numeric timer throws its message`() {
+        val e = assertFailsWith<IllegalArgumentException> {
+            base().copy(timer = true, holdMs = "x").toShortcut()
+        }
+        assertEquals("the timer needs a number of milliseconds", e.message)
+    }
+
+    @Test
+    fun `the model's own messages pass through`() {
+        val noMod = assertFailsWith<IllegalArgumentException> {
+            base().copy(modifiers = emptySet()).toShortcut()
+        }
+        assertTrue("starts with a modifier" in noMod.message!!, noMod.message)
+        val bareHome = base().copy(modifiers = setOf(ModifierKey.HOME), buttons = emptySet())
+        val home = assertFailsWith<IllegalArgumentException> { bareHome.toShortcut() }
+        assertTrue("HOME" in home.message!! && "go home" in home.message!!, home.message)
+    }
+
+    @Test
+    fun `the scope line reads for the three shapes`() {
+        assertNull(Scope.Global().line())
+        assertEquals(
+            "Everywhere except: com.a, com.b",
+            Scope.Global(setOf("com.b", "com.a")).line(),
+        )
+        assertEquals("Applies only in: com.a", Scope.Apps(setOf("com.a")).line())
+    }
+
+    @Test
+    fun `trigger text describes a recorded combo, or says there is none`() {
+        assertEquals("AYN + X", base().triggerText)
+        assertEquals(
+            Copy.NOT_RECORDED,
+            base().copy(modifiers = emptySet(), buttons = emptySet()).triggerText,
+        )
+    }
+}

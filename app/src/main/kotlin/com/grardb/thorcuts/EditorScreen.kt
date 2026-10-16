@@ -113,7 +113,21 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
                 }
             }
         }
-        draft.original?.scope?.line()?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        HorizontalDivider()
+        Text("Where", style = MaterialTheme.typography.labelMedium)
+        for (kind in ScopeKind.entries) {
+            ChoiceRow(kind.label, selected = draft.scope == kind) { vm.setScope(kind) }
+        }
+        if (draft.scope != ScopeKind.EVERYWHERE) {
+            Text(
+                if (draft.apps.isEmpty()) Copy.NO_APPS else draft.apps.sorted().joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = vm::openPicker, modifier = Modifier.fillMaxWidth()) {
+                Text("Choose apps…")
+            }
+        }
 
         HorizontalDivider()
         draft.error?.let {
@@ -127,13 +141,21 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(onClick = vm::save, modifier = Modifier.weight(1f)) { Text("Save") }
-            OutlinedButton(onClick = vm::cancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+            OutlinedButton(
+                onClick = vm::save,
+                enabled = !state.writing,
+                modifier = Modifier.weight(1f),
+            ) { Text("Save") }
+            OutlinedButton(onClick = vm::cancel, modifier = Modifier.weight(1f)) {
+                Text("Cancel")
+            }
         }
         if (draft.original != null) {
-            OutlinedButton(onClick = vm::delete, modifier = Modifier.fillMaxWidth()) {
-                Text("Delete")
-            }
+            OutlinedButton(
+                onClick = vm::delete,
+                enabled = !state.writing,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Delete") }
         }
     }
 }

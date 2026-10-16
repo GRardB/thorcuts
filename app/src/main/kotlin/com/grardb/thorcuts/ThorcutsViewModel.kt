@@ -1,6 +1,7 @@
 package com.grardb.thorcuts
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -44,7 +45,18 @@ data class UiState(
     /** ConflictDetector's warning on the draft's trigger, as copy; null when there is none, or
      *  the draft is not yet a trigger. */
     val warning: String?,
+    /** The accessibility service is connected: the app in front is being reported. */
+    val monitor: Boolean,
+    /** The package in front, or null: no monitor, nothing focused, or not yet known. */
+    val foreground: String?,
+    /** The installed apps the picker lists; empty until the picker is first opened. */
+    val apps: List<InstalledApp>,
+    /** A Save or Delete is in flight: the buttons are disabled on it (E7-2). */
+    val writing: Boolean,
 )
+
+/** One installed app the picker can scope to: its package, and its label for the list. */
+data class InstalledApp(val packageName: String, val label: String)
 
 /**
  * A view of the holder, plus the one piece of state that is the screen's own: the editor's
@@ -62,21 +74,35 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val coordinator = ThorcutsApp.of(app).coordinator
 
+    private val pm = app.packageManager
+
     /** Process-lifetime and on main: a write outlives this ViewModel. See [ThorcutsApp.writes]. */
     private val writes = ThorcutsApp.of(app).writes
 
     private val draft = MutableStateFlow<EditorDraft?>(null)
 
+    /** The ViewModel's own state beyond the draft: the picker's app list (resolved once) and
+     *  the in-flight-write flag, so the `combine` stays at five flows. */
+    private data class Local(
+        val installed: List<InstalledApp> = emptyList(),
+        val writing: Boolean = false,
+    )
+
+    private val local = MutableStateFlow(Local())
+
     private var timeout: Job? = null
 
-    /** True from a Save or Delete until its outcome returns. Read and written on main. */
-    private var writing = false
+    /** Bumped whenever the draft is opened, replaced or closed; a write captures it and
+     *  [finish] applies its outcome only while it is still current, so a Save that returns
+     *  after the user backed out cannot close or stamp the next draft (E7-1). */
+    private var draftSession = 0
 
     private fun render(
         c: CoordinatorState,
         config: ThorcutsConfig,
         recording: TriggerRecorder?,
         d: EditorDraft?,
+        l: Local,
     ) = UiState(
         enabled = c.enabled,
         transition = c.transition,
@@ -97,10 +123,16 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
                     ConflictDetector.Warning.HOLD_ON_GAMEPLAY_MODIFIER -> Copy.LATE
                 }
             },
+        monitor = c.monitor,
+        foreground = c.foreground,
+        apps = l.installed,
+        writing = l.writing,
     )
 
     val state: StateFlow<UiState> =
-        combine(coordinator.state, coordinator.config, coordinator.recording, draft, ::render)
+        combine(
+            coordinator.state, coordinator.config, coordinator.recording, draft, local, ::render,
+        )
             .stateIn(
                 viewModelScope,
                 SharingStarted.Eagerly,
@@ -108,7 +140,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
                 // reads ON and "ready" on its first frame, with no dispatch in between.
                 render(
                     coordinator.state.value, coordinator.config.value,
-                    coordinator.recording.value, draft.value,
+                    coordinator.recording.value, draft.value, local.value,
                 ),
             )
 
@@ -156,12 +188,41 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun add() {
+        draftSession++
         draft.value = EditorDraft()
     }
 
     fun edit(id: String) {
         val s = coordinator.config.value.shortcut(id) ?: return
+        draftSession++
         draft.value = EditorDraft.of(s)
+    }
+
+    fun setScope(kind: ScopeKind) = change { it.copy(scope = kind) }
+
+    fun toggleApp(packageName: String) = change {
+        val apps = if (packageName in it.apps) it.apps - packageName else it.apps + packageName
+        it.copy(apps = apps)
+    }
+
+    /** Open the picker, resolving the installed-app list once (on main; tens of ms, and only
+     *  when the user asks for it). */
+    fun openPicker() {
+        if (local.value.installed.isEmpty()) {
+            local.update { it.copy(installed = resolveInstalled()) }
+        }
+        change { it.copy(picker = true) }
+    }
+
+    fun closePicker() = change { it.copy(picker = false) }
+
+    private fun resolveInstalled(): List<InstalledApp> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION")
+        return pm.queryIntentActivities(intent, 0)
+            .associate { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+            .map { (packageName, label) -> InstalledApp(packageName, label) }
+            .sortedBy { it.label.lowercase() }
     }
 
     fun setId(id: String) = change { it.copy(id = id) }
@@ -191,11 +252,12 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         coordinator.stopRecording()
     }
 
-    /** Ignored while a write is in flight: a second tap would run the add again. */
+    /** Disabled (not merely ignored) while a write is in flight (E7-2). */
     fun save() {
         val d = draft.value ?: return
-        if (writing) return
-        writing = true
+        if (local.value.writing) return
+        local.update { it.copy(writing = true) }
+        val session = draftSession
         stopRecording()
         writes.launch {
             try {
@@ -205,37 +267,41 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val verb = if (d.original == null) "added" else "replaced"
                 Log.i(TAG, "EDIT $verb ${d.id.trim()} -> ${outcome.text()}")
-                finish(outcome)
+                finish(outcome, session)
             } finally {
-                writing = false
+                local.update { it.copy(writing = false) }
             }
         }
     }
 
-    /** Ignored while a write is in flight, like [save]. */
+    /** Disabled while a write is in flight, like [save]. */
     fun delete() {
         val id = draft.value?.original?.id ?: return
-        if (writing) return
-        writing = true
+        if (local.value.writing) return
+        local.update { it.copy(writing = true) }
+        val session = draftSession
         stopRecording()
         writes.launch {
             try {
                 val outcome = coordinator.update { it.without(id) }
                 Log.i(TAG, "EDIT removed $id -> ${outcome.text()}")
-                finish(outcome)
+                finish(outcome, session)
             } finally {
-                writing = false
+                local.update { it.copy(writing = false) }
             }
         }
     }
 
     fun cancel() {
+        draftSession++
         stopRecording()
         draft.value = null
     }
 
-    /** Applied closes the editor; Rejected keeps it open with the reason under Save. */
-    private fun finish(outcome: UpdateOutcome) {
+    /** Applied closes the editor; Rejected keeps it open with the reason under Save — but
+     *  only while this is still the draft the write was started for (E7-1). */
+    private fun finish(outcome: UpdateOutcome, session: Int) {
+        if (session != draftSession) return
         when (outcome) {
             is UpdateOutcome.Applied -> draft.value = null
             is UpdateOutcome.Rejected -> draft.update { it?.copy(error = outcome.reason) }

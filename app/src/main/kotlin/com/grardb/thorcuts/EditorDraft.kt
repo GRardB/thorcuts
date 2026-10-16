@@ -10,6 +10,13 @@ import com.grardb.thorcuts.core.model.ThorControls
 import com.grardb.thorcuts.core.model.Trigger
 import com.grardb.thorcuts.core.model.TriggerStyle
 
+/** Where a shortcut applies, as the editor's three radios offer it. */
+enum class ScopeKind(val label: String) {
+    EVERYWHERE("Everywhere"),
+    EXCEPT("Everywhere except…"),
+    ONLY("Only in…");
+}
+
 /** The five kinds of action the editor offers; three of them aim at a screen. */
 enum class ActionKind(val label: String, val takesScreen: Boolean) {
     SWAP("Swap the screens", false),
@@ -84,6 +91,9 @@ object Copy {
     const val NEEDS_MODIFIER = "A shortcut starts with AYN, Home, Back, Start or Select."
     const val MODIFIER_NOTE = "A shortcut on Start or Select makes a plain tap of that button " +
         "reach the game only when it is released."
+    const val MONITOR_OFF =
+        "Per-app shortcuts are off — tap to turn on the accessibility service"
+    const val NO_APPS = "No apps chosen yet"
     const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
         "release — it will feel late in that game."
     val NOTES = listOf(
@@ -103,7 +113,8 @@ object Copy {
  * for the warnings.
  */
 data class EditorDraft(
-    /** The shortcut being edited; null when adding. Its scope and enabled flag are kept. */
+    /** The shortcut being edited; null when adding. Its enabled flag is kept; its scope is
+     *  edited here (M4). */
     val original: Shortcut? = null,
     val id: String = "",
     val modifiers: Set<ModifierKey> = emptySet(),
@@ -112,6 +123,12 @@ data class EditorDraft(
     val holdMs: String = "400",
     val action: ActionKind = ActionKind.SWAP,
     val screen: ScreenTarget = ScreenTarget.FOCUSED,
+    val scope: ScopeKind = ScopeKind.EVERYWHERE,
+    /** The packages the scope names: the exclusions for [ScopeKind.EXCEPT], the inclusions
+     *  for [ScopeKind.ONLY], ignored for [ScopeKind.EVERYWHERE]. */
+    val apps: Set<String> = emptySet(),
+    /** The app picker is open over the editor. */
+    val picker: Boolean = false,
     /** The last Rejected reason, shown under Save until the next change. */
     val error: String? = null,
 ) {
@@ -129,14 +146,26 @@ data class EditorDraft(
         return Trigger(modifiers, buttons, style, ms)
     }
 
-    /** The shortcut the draft describes; the original's scope and enabled flag are kept. */
+    /** The shortcut the draft describes; the scope comes from the radios and the picked
+     *  apps, the original's enabled flag is kept. */
     fun toShortcut(): Shortcut = Shortcut(
         id = id.trim(),
         trigger = trigger(),
         action = action.action(screen),
-        scope = original?.scope ?: Scope.Global(),
+        scope = toScope(),
         enabled = original?.enabled ?: true,
     )
+
+    /** The scope the draft describes, or a throw with the draft's own message when an app
+     *  list is empty (the model's "an Apps scope names at least one package" names a type;
+     *  this names what to do). */
+    private fun toScope(): Scope = when (scope) {
+        ScopeKind.EVERYWHERE -> Scope.Global()
+        ScopeKind.EXCEPT -> { requireApps(); Scope.Global(apps) }
+        ScopeKind.ONLY -> { requireApps(); Scope.Apps(apps) }
+    }
+
+    private fun requireApps() = require(apps.isNotEmpty()) { "choose at least one app" }
 
     /** The recorded combo as text: the trigger's description when it is one, else the names
      *  pressed so far (no modifier yet), else "Not recorded yet". */
@@ -159,6 +188,19 @@ data class EditorDraft(
             holdMs = (s.trigger.holdMs ?: 400).toString(),
             action = ActionKind.of(s.action),
             screen = ActionKind.screenOf(s.action) ?: ScreenTarget.FOCUSED,
+            scope = scopeKindOf(s.scope),
+            apps = appsOf(s.scope),
         )
+
+        private fun scopeKindOf(scope: Scope): ScopeKind = when (scope) {
+            is Scope.Global -> if (scope.excluded.isEmpty()) ScopeKind.EVERYWHERE
+            else ScopeKind.EXCEPT
+            is Scope.Apps -> ScopeKind.ONLY
+        }
+
+        private fun appsOf(scope: Scope): Set<String> = when (scope) {
+            is Scope.Global -> scope.excluded
+            is Scope.Apps -> scope.included
+        }
     }
 }
