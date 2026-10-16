@@ -7,11 +7,16 @@ import com.grardb.thorcuts.platform.helper.HelperChannel
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.log.RecordingLogger
 import com.grardb.thorcuts.platform.privilege.FakeGateway
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
+import org.junit.jupiter.api.assertTimeoutPreemptively
+import java.time.Duration
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -29,7 +34,17 @@ import kotlin.test.assertTrue
 class ThorcutsCoordinatorQueuedTest {
 
     private val scheduler = TestCoroutineScheduler()
-    private val privileged = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+
+    /** A throw in a drained body reaches here, not the test, unless every test asserts its
+     *  effects — so [noUnhandledFailures] backs that with the scope itself (R3-5). */
+    private val failures = mutableListOf<Throwable>()
+    private val privileged = CoroutineScope(
+        SupervisorJob() + StandardTestDispatcher(scheduler) +
+            CoroutineExceptionHandler { _, t -> failures += t },
+    )
+
+    /** The store's own scheduler, for the one test that parks an attempt at store.load(). */
+    private val storeScheduler = TestCoroutineScheduler()
     private val file = MemoryConfigFile()
     private val switch = FakeSwitch()
     private val held = mutableListOf<Boolean>()
@@ -39,7 +54,9 @@ class ThorcutsCoordinatorQueuedTest {
     /** The relaunch chain's clock, in milliseconds, so no test here depends on the wall clock. */
     private var now = 0L
 
-    private fun coordinator() = ThorcutsCoordinator(
+    private fun coordinator(
+        storeDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+    ) = ThorcutsCoordinator(
         gateway = FakeGateway(),
         channel = { onMessage -> FakeChannel(onMessage).also { channel = it } },
         file = file,
@@ -49,12 +66,27 @@ class ThorcutsCoordinatorQueuedTest {
         homePackages = { emptySet() },
         log = log,
         privileged = privileged,
-        storeDispatcher = Dispatchers.Unconfined,
+        storeDispatcher = storeDispatcher,
         clock = { now },
     )
 
-    /** Run everything queued on the privileged thread, including what that work queues. */
-    private fun drain() = scheduler.runCurrent()
+    /** No drained body reached the scope's handler as an unhandled throw (R3-5). */
+    @AfterTest
+    fun noUnhandledFailures() {
+        assertTrue(failures.isEmpty(), "unhandled in a drained body: $failures")
+    }
+
+    /** Run everything queued on the privileged thread, including what that work queues.
+     *  Bounded, so a body that re-queues itself fails the test instead of hanging it (R3-4). */
+    private fun drain() = assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+        scheduler.runCurrent()
+    }
+
+    /** Both schedulers to quiescence — the privileged work and the store hops it awaits, no
+     *  virtual time advanced — for the test whose store is on [storeScheduler]. Bounded. */
+    private fun settle() = assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+        repeat(50) { scheduler.runCurrent(); storeScheduler.runCurrent() }
+    }
 
     @Test
     fun `the switch write precedes the start on the queue, and the hold precedes both`() {
@@ -180,5 +212,31 @@ class ThorcutsCoordinatorQueuedTest {
         assertEquals(listOf("start"), channel.calls)            // no start after the OFF
         assertEquals(listOf(true, false), held)                 // and no second release
         assertFalse(c.state.value.running)
+    }
+
+    @Test
+    fun `a relaunch queued while an attempt parks at load runs interleaved`() {
+        // The store on its own scheduler, so an attempt parks at store.load() where a loss
+        // can be injected between the schedulers — the production interleaving the Unconfined
+        // suites cannot show (R2-3; the final review's test gap).
+        val c = coordinator(StandardTestDispatcher(storeScheduler))
+        c.setEnabled(true)
+        settle()                                                // a session started and ready
+        channel.emit(HelperMessage.Ready(1))
+        storeScheduler.runCurrent()                             // Ready's push
+        now = 0L
+        channel.emit(HelperMessage.Exiting("signal"))           // a relaunch owed, "restarting…"
+        scheduler.runCurrent()                                  // the 2nd attempt parks at load
+        assertEquals("restarting…", c.state.value.transition)
+        assertEquals(listOf("start"), channel.calls)            // not started yet
+        now = 61_000L
+        channel.emit(HelperMessage.Exiting("signal"))           // a new chain: a 3rd attempt
+        assertEquals("restarting…", c.state.value.transition)   // still owed by the 3rd
+        settle()
+        assertEquals(listOf("start", "start", "start"), channel.calls)
+        assertEquals(listOf(true), held)                        // relaunches hold nothing
+        assertNull(c.state.value.transition)                    // ended by the last attempt
+        assertTrue(switch.on)
+        assertTrue(c.state.value.running)
     }
 }
