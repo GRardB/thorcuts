@@ -58,7 +58,13 @@ class HelperSupervisor(
                     break
                 }
             }
-            if (running) return HelperChannel.Start.ALREADY_RUNNING
+            if (running) {
+                // The only signal in the supervisor's own tag that a session hung: the
+                // coordinator logs the outcome, not the wait.
+                val waited = SystemClock.elapsedRealtime() - from
+                Log.w(TAG, "SESSION_WAIT timeout after ${waited}ms; session still up")
+                return HelperChannel.Start.ALREADY_RUNNING
+            }
             Log.i(TAG, "SESSION_WAIT ${SystemClock.elapsedRealtime() - from}ms")
         }
         running = true
@@ -187,6 +193,11 @@ class HelperSupervisor(
             onMessage(HelperMessage.Log("helper did not exit cleanly"))
         }
 
+        // `running` goes false BEFORE the name is released here — the reverse of the unasked
+        // teardown's order in acceptLoop — because the self-connect below must find the
+        // accept loop ready to exit, not take the unasked branch. Safe only because start()
+        // and stop() share the one privileged thread: no start() can be waiting on the flag
+        // while this runs.
         running = false
         pinger?.interrupt()
         pinger = null

@@ -139,4 +139,46 @@ class ThorcutsCoordinatorQueuedTest {
         assertEquals("could not bind the helper socket", c.state.value.helperState)
         assertEquals(listOf(true, false), held)
     }
+
+    @Test
+    fun `a give-up while a relaunch is queued ends the transition and never starts`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        drain()
+        channel.emit(HelperMessage.Ready(1))
+        now = 1_000
+        channel.emit(HelperMessage.Exiting("signal"))           // a relaunch owed, queued
+        assertEquals("restarting…", c.state.value.transition)
+        assertEquals(listOf("start"), channel.calls)
+        now = 2_000
+        channel.emit(HelperMessage.Exiting("signal"))           // a second loss: gave up
+        assertNull(c.state.value.transition)                    // nobody else would end it
+        assertFalse(c.state.value.enabled)
+        assertEquals(listOf(true, false), switch.writes)
+        assertEquals(listOf(true, false), held)
+        drain()                                                 // the queued relaunch runs
+        assertEquals(listOf("start"), channel.calls)            // and returns at takeOwed()
+        assertEquals(listOf(true, false), held)                 // releasing nothing
+        assertNull(c.state.value.transition)
+        c.setEnabled(true)                                      // the switch works again
+        assertEquals("starting…", c.state.value.transition)
+    }
+
+    @Test
+    fun `the panic while a relaunch is queued cancels it`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        drain()
+        channel.emit(HelperMessage.Ready(1))
+        channel.emit(HelperMessage.Exiting("signal"))           // a relaunch owed, queued
+        channel.emit(HelperMessage.Exiting("panic combo"))      // the user wants the pad back
+        assertFalse(switch.on)
+        assertEquals(listOf(true, false), switch.writes)
+        assertNull(c.state.value.transition)
+        assertEquals(listOf(true, false), held)
+        drain()
+        assertEquals(listOf("start"), channel.calls)            // no start after the OFF
+        assertEquals(listOf(true, false), held)                 // and no second release
+        assertFalse(c.state.value.running)
+    }
 }

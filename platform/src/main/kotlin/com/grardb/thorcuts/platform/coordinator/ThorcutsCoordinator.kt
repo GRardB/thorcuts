@@ -186,8 +186,8 @@ class ThorcutsCoordinator(
     private var lastLossAt: Long? = null
 
     /** A relaunch is queued and not yet begun: the attempt whose helper was lost keeps the
-     *  transition for it ([endTransition]), and a failed start withdraws it. Under the
-     *  monitor. */
+     *  transition for it ([endTransition]); a failed start withdraws it; a give-up or the
+     *  panic cancels it ([decideLoss]). Under the monitor. */
     private var relaunchOwed = false
 
     init {
@@ -385,7 +385,8 @@ class ThorcutsCoordinator(
     /**
      * One start on the privileged thread. A relaunch holds nothing — the process never let
      * go — and is skipped when the owed relaunch was withdrawn by a failed start queued ahead
-     * of it. Two BLOCKING starts never overlap (one thread, FIFO); an attempt does yield the
+     * of it, or cancelled by a give-up or the panic (which end the transition it would have
+     * ended). Two BLOCKING starts never overlap (one thread, FIFO); an attempt does yield the
      * thread at `store.load()` (a hop to the store's thread), so a relaunch queued in that
      * window runs interleaved with it, and the transition is ended by whichever attempt
      * finishes with no relaunch owed.
@@ -503,14 +504,16 @@ class ThorcutsCoordinator(
      * waiting for it, a stop that timed out — finds nothing held, so there is nothing to
      * relaunch into: it releases as it always did); else the chain — RELAUNCH for the first
      * loss, or one at least [RELAUNCH_WINDOW_MS] after the previous, GIVE_UP for a second
-     * within it. A relaunch keeps `running` (the switch reads
-     * ON; ensureRunning does nothing), shows "restarting…" unless a start is in flight (whose
-     * attempt then keeps its own transition for the relaunch queued behind it) and marks the
-     * relaunch owed. A give-up turns the switch off at a fresh epoch.
+     * within it. A relaunch keeps `running` (the switch reads ON; ensureRunning does
+     * nothing), shows "restarting…" unless a start is in flight (whose attempt then keeps its
+     * own transition for the relaunch queued behind it) and marks the relaunch owed. A give-up
+     * turns the switch off at a fresh epoch. A give-up or a RELEASE that finds a relaunch
+     * still queued cancels it, and ends the "restarting…" that relaunch would have ended.
      */
     @Synchronized
     private fun decideLoss(helperState: String): LossDecision {
         val now = clock()
+        val owed = relaunchOwed
         var verdict = Loss.RELEASE
         _state.update { s ->
             verdict = when {
@@ -522,13 +525,19 @@ class ThorcutsCoordinator(
             val gone = s.copy(
                 helperLive = false, helperState = helperState, tableState = NO_TABLE_NO_HELPER,
             )
+            // A relaunch still queued is cancelled below, and its attempt returns before the
+            // try that would have ended the transition it was handed — so a "restarting…"
+            // with no other owner ends here. A "starting…" belongs to an attempt in flight,
+            // which ends its own.
+            val ended = if (owed && s.transition == RESTARTING) null else s.transition
             when (verdict) {
                 Loss.RELAUNCH -> gone.copy(transition = s.transition ?: RESTARTING)
                 Loss.GIVE_UP -> gone.copy(
-                    enabled = false, running = false,
+                    enabled = false, running = false, transition = ended,
                     helperState = "gave up: $helperState, twice in a minute",
                 )
-                else -> gone.copy(running = false)
+                Loss.RELEASE -> gone.copy(running = false, transition = ended)
+                Loss.STOPPING -> gone.copy(running = false)
             }
         }
         when (verdict) {
@@ -545,7 +554,10 @@ class ThorcutsCoordinator(
                 log.w("RELAUNCH gave up: $helperState")
                 row("GAVE UP: $helperState")
             }
-            else -> Unit
+            // The panic, or a loss that found nothing running: nothing may start after it. A
+            // relaunch still queued returns at takeOwed().
+            Loss.RELEASE -> relaunchOwed = false
+            Loss.STOPPING -> Unit
         }
         return LossDecision(verdict, switchEpoch)
     }
