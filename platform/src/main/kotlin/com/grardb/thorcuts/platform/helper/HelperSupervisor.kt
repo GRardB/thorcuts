@@ -33,24 +33,45 @@ class HelperSupervisor(
     @Volatile private var stopRequested = false
     @Volatile private var server: LocalServerSocket? = null
     @Volatile private var out: OutputStream? = null
+    @Volatile private var pinger: Thread? = null
 
     /**
      * Bind the socket, then launch the helper. Call on Privilege.dispatcher. NOT_BOUND only
      * when the socket could not be bound (a launch that fails says so as a message);
-     * ALREADY_RUNNING when a session is already up, which the coordinator treats as no
-     * start at all — the terminal message of a dying session reaches it before this flag
-     * resets, so "already running" can mean "still winding down".
+     * ALREADY_RUNNING only when a dying session has not ended within [SESSION_WAIT_MS] —
+     * its terminal message reaches the coordinator seconds before its socket closes, and
+     * this waits that out — which the coordinator treats as no start at all.
      */
     override fun start(): HelperChannel.Start {
-        if (running) return HelperChannel.Start.ALREADY_RUNNING
+        // A session that just reported its exit is still winding down: the helper restores
+        // the pad's number (3 s) between its last words and closing the socket, and
+        // acceptLoop releases the name only at EOF. The coordinator asks only when it holds
+        // no session, so `running` here means exactly that window — wait for it, bounded,
+        // before binding. A relaunch after an `X`-reason loss lands here every time; a
+        // reopen in the window did too, and used to be answered ALREADY_RUNNING at once.
+        if (running) {
+            val from = SystemClock.elapsedRealtime()
+            while (running && SystemClock.elapsedRealtime() - from < SESSION_WAIT_MS) {
+                try {
+                    Thread.sleep(STOP_POLL_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+            if (running) return HelperChannel.Start.ALREADY_RUNNING
+            Log.i(TAG, "SESSION_WAIT ${SystemClock.elapsedRealtime() - from}ms")
+        }
         running = true
         stopRequested = false
 
-        // Self-heal. This covers a SIGKILL, a crash, or the app being swiped from
-        // recents — the cases where neither the helper's own teardown nor a clean
-        // stop could run, and where a pad left renumbered (or deregistered
-        // outright) is exactly what breaks the emulators this feature exists to
-        // fix, with nothing on screen to connect the two facts.
+        // Self-heal. This covers a SIGKILL of the helper, a crash mid-takeover, a
+        // restore that never landed — the cases where the helper's own teardown
+        // could not finish and no clean stop ran (a swipe from recents is NOT one:
+        // measured 2026-10-14, it is a force-stop whose socket close the helper
+        // does see, and it restores the pad on the way out) — and where a pad left
+        // renumbered (or deregistered outright) is exactly what breaks the
+        // emulators this feature exists to fix, with nothing on screen to connect
+        // the two facts.
         //
         // IT RUNS HERE, WHICH IS WHEN THE USER TAPS START — NOT WHEN THE APP
         // OPENS. Nothing auto-starts the helper, so a user who opens Thorcuts to
@@ -101,7 +122,7 @@ class HelperSupervisor(
         server = ss
 
         Thread({ acceptLoop(ss) }, "thorcuts-helper-accept").apply { isDaemon = true }.start()
-        Thread(::pingLoop, "thorcuts-helper-ping").apply { isDaemon = true }.start()
+        pinger = Thread(::pingLoop, "thorcuts-helper-ping").apply { isDaemon = true; start() }
 
         launch()
         return HelperChannel.Start.STARTED
@@ -167,6 +188,8 @@ class HelperSupervisor(
         }
 
         running = false
+        pinger?.interrupt()
+        pinger = null
 
         // Wake the accept thread before closing, or the socket never goes away.
         // LocalServerSocket.close() does NOT interrupt a thread already blocked in
@@ -317,9 +340,16 @@ class HelperSupervisor(
                 } else {
                     Log.i(TAG, "helper gone unasked; supervisor reset so start() can bind again")
                 }
-                running = false
+                // The name is released BEFORE the session is declared over: a start() woken
+                // by `running` going false (a relaunch's) binds the same name and must not
+                // race the close. The pinger is interrupted rather than left to notice the
+                // flag — it may not within its one-second sleep, and the relaunch sets the
+                // flag true again; left alone, one more pinger per relaunch would outlive it.
                 try { ss.close() } catch (_: Throwable) {}
                 server = null
+                pinger?.interrupt()
+                pinger = null
+                running = false
                 return
             }
         }
@@ -411,6 +441,13 @@ class HelperSupervisor(
          */
         private const val STOP_WAIT_MS = 8000L
         private const val STOP_POLL_MS = 50L
+
+        /**
+         * How long start() waits for a dying session to close its socket before answering
+         * ALREADY_RUNNING. The helper's teardown restore is the same 3 s cycle stop() waits
+         * for, so the same budget with the same headroom.
+         */
+        private const val SESSION_WAIT_MS = 8000L
 
         /**
          * What to say when restoreNumbering() reports that pservice never ran the

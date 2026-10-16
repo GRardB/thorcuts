@@ -22,9 +22,9 @@ interface HelperChannel {
 
         /**
          * Nothing done: a session was already running. For the coordinator, which only
-         * asks when it holds no session, this names the supervisor's one race — a session's
-         * terminal message is delivered before its own session flag resets — so it is NOT a
-         * start, and the caller must not claim one.
+         * asks when it holds no session, this means a dying session — its terminal message
+         * reaches the coordinator seconds before its socket closes — did not end within the
+         * supervisor's wait. NOT a start; the caller must not claim one.
          */
         ALREADY_RUNNING,
 
