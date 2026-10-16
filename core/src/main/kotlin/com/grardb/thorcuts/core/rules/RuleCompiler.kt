@@ -19,9 +19,10 @@ object RuleCompiler {
     /**
      * The shortcuts that apply in [foreground], in input order.
      *
-     * `null` means NO scoping information — there is no foreground monitor until M4, so
-     * every push until then is `null`. Global rules apply (their exclusions cannot be
-     * evaluated, so none is); app-scoped rules need a positive match they cannot get.
+     * `null` means NO scoping information — no monitor, nothing focused, or the app in front
+     * not yet known (the store's `foreground`). Global rules apply (their exclusions cannot
+     * be evaluated, so none is); app-scoped rules need a positive match they cannot get. A
+     * package no scope names selects the same list as `null`.
      */
     fun select(shortcuts: List<Shortcut>, foreground: String?): List<Shortcut> =
         shortcuts.filter { s ->
@@ -39,5 +40,29 @@ object RuleCompiler {
         }
         val bytes = RuleTableFormat.encode(selected.map { it.trigger }, generation)
         return CompiledTable(generation, selected, bytes)
+    }
+
+    /**
+     * Every selection [shortcuts] can produce fits the table, or a throw naming the first
+     * that does not: the selection at `null` and at each package some scope names. A package
+     * no scope names selects exactly what `null` does — every global rule, no app rule — so
+     * those are all the selections there are. The store's `update` validates with this, so
+     * an edit can never write a list that compiles at one app and overflows at another
+     * (config spec, Important 2).
+     */
+    fun check(shortcuts: List<Shortcut>) {
+        val named = shortcuts.flatMap { s ->
+            when (val scope = s.scope) {
+                is Scope.Global -> scope.excluded
+                is Scope.Apps -> scope.included
+            }
+        }.toSortedSet()
+        for (where in listOf<String?>(null) + named) {
+            val n = select(shortcuts, where).size
+            require(n <= MAX_RULES) {
+                "$n shortcuts apply ${if (where == null) "here" else "in $where"}; " +
+                    "the table holds at most $MAX_RULES"
+            }
+        }
     }
 }

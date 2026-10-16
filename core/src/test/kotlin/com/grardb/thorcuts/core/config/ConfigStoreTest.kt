@@ -448,6 +448,150 @@ class ConfigStoreTest {
         assertEquals(listOf(1), pushedGens())
     }
 
+    // ── the app in front (M4) ─────────────────────────────────────────────────────────
+
+    /** A shortcut on AYN + [code] that applies only in Dolphin. */
+    private fun onlyDolphin(id: String, code: Int = 304) = Defaults.SWAP_SCREENS.copy(
+        id = id,
+        trigger = Defaults.SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(code))),
+        scope = Scope.Apps(setOf(DOLPHIN)),
+    )
+
+    /** The default's swap plus one shortcut only in Dolphin: one rule unscoped, two there. */
+    private val scoped = ThorcutsConfig(listOf(Defaults.SWAP_SCREENS, onlyDolphin("only-d")))
+
+    /** Sixty global shortcuts and five only in Dolphin: fits everywhere but there. */
+    private val overInDolphin =
+        ThorcutsConfig(many(60).shortcuts + (0 until 5).map { onlyDolphin("d$it", 600 + it) })
+
+    @Test
+    fun `foreground before Ready pushes nothing and consumes no generation`() {
+        val s = store(default = scoped)
+        runBlocking { s.load() }
+        s.foreground(DOLPHIN)
+        assertTrue(pushed.isEmpty())
+        s.helperReady()
+        assertEquals(listOf(1), pushedGens())                   // nothing was consumed
+        assertEquals(listOf("swap-screens", "only-d"), pushed.single().shortcuts.map { it.id })
+    }
+
+    @Test
+    fun `a foreground change with a live helper pushes that app's list`() {
+        val s = store(default = scoped)
+        runBlocking { s.load() }
+        s.helperReady()                                         // in front: unknown
+        assertEquals(listOf(1), pushed.map { it.ruleCount })
+        s.foreground(DOLPHIN)
+        assertEquals(listOf(1, 2), pushedGens())
+        assertEquals(listOf(1, 2), pushed.map { it.ruleCount })
+        s.foreground(null)                                      // unknown again: the global list
+        assertEquals(listOf(1, 2, 1), pushed.map { it.ruleCount })
+    }
+
+    @Test
+    fun `a foreground change whose list is the same sends nothing`() {
+        val s = store(default = scoped)
+        runBlocking { s.load() }
+        s.helperReady()
+        s.foreground(RETROARCH)                                 // unnamed: the global list again
+        s.foreground(RETROARCH)                                 // and no change at all
+        assertEquals(listOf(1), pushedGens())
+        s.foreground(DOLPHIN)
+        assertEquals(listOf(1, 2), pushedGens())                // the next real push is gen 2
+    }
+
+    @Test
+    fun `a write that changes nothing selected sends nothing but reports written`() {
+        val s = store(default = scoped)
+        runBlocking { s.load() }
+        s.helperReady()
+        s.foreground(RETROARCH)
+        val outcome = runBlocking { s.update { it.withEnabled("only-d", false) } }
+        assertIs<UpdateOutcome.Applied>(outcome)
+        assertEquals(2, file.writes.size)
+        assertEquals(1, events.count { it is Event.Written })
+        assertEquals(listOf(1), pushedGens())                   // not selected here: no push
+        s.foreground(DOLPHIN)                                   // disabled: the same list there
+        assertEquals(listOf(1), pushedGens())
+    }
+
+    @Test
+    fun `a write is refused when a named app would overflow`() {
+        val s = store(default = scoped)
+        runBlocking { s.load() }
+        s.helperReady()
+        val more = (0 until 63).map { onlyDolphin("d$it", 512 + it) }
+        val outcome = runBlocking { s.update { c -> ThorcutsConfig(c.shortcuts + more) } }
+        val reason = "65 shortcuts apply in $DOLPHIN; the table holds at most 64"
+        assertEquals(UpdateOutcome.Rejected(reason), outcome)
+        assertEquals(1, file.writes.size)                       // the default at load; no more
+        assertEquals(listOf(1), pushedGens())
+    }
+
+    @Test
+    fun `an app in front whose list overflows keeps the helper's table and reports`() {
+        file.text = ConfigCodec.encode(overInDolphin)           // only a file can hold one
+        val s = store()
+        runBlocking { s.load() }
+        s.helperReady()
+        assertEquals(listOf(60), pushed.map { it.ruleCount })
+        s.foreground(DOLPHIN)
+        val failed = only<Event.PushFailed>()
+        assertEquals(2, failed.generation)
+        assertEquals("65 shortcuts apply here; the table holds at most 64", failed.reason)
+        assertEquals(listOf(1), pushedGens())                   // the helper keeps gen 1
+        s.foreground(RETROARCH)                                 // the global list: what it holds
+        assertEquals(listOf(1), pushedGens())
+        s.tableAccepted(2, installed = true)                    // the failed one: a fault
+        assertEquals(Event.UnexpectedAck(2), only<Event.UnexpectedAck>())
+    }
+
+    @Test
+    fun `an installed ack below a later failed generation keeps that failure a fault`() {
+        file.text = ConfigCodec.encode(overInDolphin)
+        val s = store()
+        runBlocking { s.load() }
+        s.helperReady()                                         // gen 1 sent
+        s.foreground(DOLPHIN)                                   // gen 2 consumed, nothing sent
+        assertEquals(2, only<Event.PushFailed>().generation)
+        s.tableAccepted(1, installed = true)                    // prunes nothing above it
+        s.tableAccepted(2, installed = true)
+        assertEquals(Event.UnexpectedAck(2), only<Event.UnexpectedAck>())
+        s.fired(1, 0)
+        assertIs<FireResolution.Hit>(only<Event.Fire>().resolution)
+    }
+
+    @Test
+    fun `an installed ack prunes the failed generations below it`() {
+        file.text = ConfigCodec.encode(many(65))
+        val s = store()
+        runBlocking { s.load() }
+        s.helperReady()                                         // gen 1 consumed, nothing sent
+        runBlocking { s.update { c -> ThorcutsConfig(c.shortcuts.take(64)) } }   // gen 2 sent
+        events.clear()
+        s.tableAccepted(2, installed = true)                    // 1 is settled
+        s.tableAccepted(1, installed = true)
+        assertTrue(events.none { it is Event.UnexpectedAck })
+    }
+
+    @Test
+    fun `a loss clears sent, so a reconnect whose own first push fails still pushes`() {
+        file.text = ConfigCodec.encode(overInDolphin)
+        val s = store()
+        runBlocking { s.load() }
+        s.helperReady()                                   // gen 1: the global list, 60 rules
+        s.foreground(DOLPHIN)                             // gen 2 overflows; the helper keeps 60
+        s.helperGone()                                    // the loss clears sent
+        s.helperReady()                                   // reconnect, Dolphin: gen 3 overflows
+        assertEquals(listOf(60), pushed.map { it.ruleCount })       // fresh helper holds nothing
+        assertEquals(
+            listOf(2, 3),
+            events.filterIsInstance<Event.PushFailed>().map { it.generation },
+        )
+        s.foreground(null)                                // back to the global list
+        assertEquals(listOf(60, 60), pushed.map { it.ruleCount })   // pushed, not skipped
+    }
+
     // ── the real dispatcher ───────────────────────────────────────────────────────────
 
     @Test

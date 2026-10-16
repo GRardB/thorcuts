@@ -131,4 +131,35 @@ class RuleCompilerTest {
         val one = many.take(64) + shortcut("elsewhere", Scope.Apps(setOf(dolphin)), code = 600)
         assertEquals(64, RuleCompiler.compile(one, null, 1).ruleCount)
     }
+
+    @Test
+    fun `check passes a list that fits at null and in every named app`() {
+        val globals = (0 until 59).map { shortcut("g$it", Scope.Global(), code = 512 + it) } +
+            shortcut("not-ra", Scope.Global(excluded = setOf(retroarch)), code = 571)
+        val dolphins = (0 until 4).map {
+            shortcut("d$it", Scope.Apps(setOf(dolphin)), code = 600 + it)
+        }
+        val list = globals + dolphins
+        assertEquals(60, RuleCompiler.select(list, null).size)
+        assertEquals(59, RuleCompiler.select(list, retroarch).size)
+        assertEquals(64, RuleCompiler.select(list, dolphin).size)
+        RuleCompiler.check(list)                                // nothing thrown
+    }
+
+    @Test
+    fun `check refuses a list that overflows in a named app, naming it`() {
+        val globals = (0 until 60).map { shortcut("g$it", Scope.Global(), code = 512 + it) }
+        val dolphins = (0 until 5).map {
+            shortcut("d$it", Scope.Apps(setOf(dolphin)), code = 600 + it)
+        }
+        val list = globals + dolphins
+        assertEquals(60, RuleCompiler.compile(list, null, 1).ruleCount)   // fits unscoped
+        val e = assertFailsWith<IllegalArgumentException> { RuleCompiler.check(list) }
+        assertEquals("65 shortcuts apply in $dolphin; the table holds at most 64", e.message)
+    }
+
+    @Test
+    fun `an unnamed package selects what null does`() {
+        assertEquals(RuleCompiler.select(all, null), RuleCompiler.select(all, "com.example.x"))
+    }
 }

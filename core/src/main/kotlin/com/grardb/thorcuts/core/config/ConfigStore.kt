@@ -1,5 +1,6 @@
 package com.grardb.thorcuts.core.config
 
+import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.rules.CompiledTable
 import com.grardb.thorcuts.core.rules.FireResolution
 import com.grardb.thorcuts.core.rules.RetainedTables
@@ -19,14 +20,16 @@ import java.util.concurrent.Executors
 
 /**
  * Parent spec §8's serialising actor for the config: the one owner of the current
- * [ThorcutsConfig], the generation counter, the retained tables, recompile-on-write, and
- * the Ready / ack / fire bookkeeping around the helper's table.
+ * [ThorcutsConfig], the app in front, the generation counter, the retained tables, the
+ * recompile on a write or an app switch, and the Ready / ack / fire bookkeeping around the
+ * helper's table.
  *
  * One thread, in order. Everything this class owns is touched only on [dispatcher] — a
  * single daemon thread of its own by default (deliberately not the privileged thread: a
  * config write must not wait behind a `stop()` that can block for seconds). [load] and
- * [update] are `suspend` and hop there; the four helper-side calls post there and return
- * at once, so the supervisor's accept thread never blocks. Calls land in the order made.
+ * [update] are `suspend` and hop there; the four helper-side calls and [foreground] post
+ * there and return at once, so the supervisor's accept thread never blocks. Calls land in
+ * the order made.
  * [onEvent] is invoked on that thread too.
  *
  * The store never sees a socket, an Android class, or the protocol: the file is behind
@@ -74,11 +77,24 @@ class ConfigStore(
 
     /** The generations a failed compile consumed: reported as [Event.PushFailed], nothing sent.
      *  An ack naming one is a fault, not a pruned-but-real table — see [tableAccepted]. Grows
-     *  only on a failed compile: the over-limit loaded file today, a per-app recompile in M4. */
+     *  on a failed compile (a loaded file that overflows for the app in front; an edit cannot
+     *  write one, see [update]) and is pruned by an installed ack. */
     private val unsent = mutableSetOf<Int>()
 
     /** True between [helperReady] and [helperGone]: a write pushes only while this holds. */
     private var helperLive = false
+
+    /** The focused app's package, or null: no monitor, nothing focused, or not known yet.
+     *  Every compile is for this app (`RuleCompiler.select`). */
+    private var foreground: String? = null
+
+    /** The selected list the helper holds — what the last push carried — or null when no
+     *  helper holds a table (before the first push, and after [helperGone]). A push whose
+     *  selection equals it is skipped: the helper would install the same rules under a new
+     *  generation for nothing. Within a live session a failed compile leaves it (the helper
+     *  still holds the last list); a loss clears it, so a reconnect whose own first push
+     *  fails still pushes the next real selection. */
+    private var sent: List<Shortcut>? = null
 
     /** Set at the end of [load]. An [update] before it would persist the empty placeholder
      *  over a file nobody has read yet — the one way memory could get ahead of the file. */
@@ -178,9 +194,10 @@ class ConfigStore(
     }
 
     /**
-     * The one way to change the config: validate (by compiling), persist, publish, then
-     * recompile-and-push if a helper is live. A [UpdateOutcome.Rejected] changes nothing —
-     * not the file, not memory, not the generation.
+     * The one way to change the config: validate (by compiling, at every selection the list
+     * can produce), persist, publish, then — with a helper live — push the list selected
+     * for the app in front if it changed. A [UpdateOutcome.Rejected] changes nothing — not
+     * the file, not memory, not the generation.
      */
     suspend fun update(edit: (ThorcutsConfig) -> ThorcutsConfig): UpdateOutcome =
         withContext(dispatcher) {
@@ -191,9 +208,11 @@ class ConfigStore(
                 return@withContext UpdateOutcome.Rejected(e.message ?: e.toString())
             }
             // Validate by compiling. The only `require` today is "more than 64 applicable
-            // rules"; whatever the compiler refuses, the file never sees.
-            val table = try {
-                RuleCompiler.compile(candidate.shortcuts, null, generation + 1)
+            // rules", checked at `null` and in every app some scope names, so an edit cannot
+            // write a list that fits here and overflows there; whatever the compiler
+            // refuses, the file never sees.
+            try {
+                RuleCompiler.check(candidate.shortcuts)
             } catch (e: IllegalArgumentException) {
                 return@withContext UpdateOutcome.Rejected(e.message ?: "does not compile")
             }
@@ -205,9 +224,24 @@ class ConfigStore(
             }
             publish(candidate)
             onEvent(Event.Written(candidate))
-            if (helperLive) offer(table)
+            if (helperLive) pushIfChanged()
             UpdateOutcome.Applied(candidate)
         }
+
+    /**
+     * The app in front changed (`ForegroundAppMonitor`), or is unknown (null: no monitor,
+     * nothing focused, or not known yet — the global list, as every push was before M4).
+     * Posts to the store's thread and returns at once. With a live helper the current config
+     * is compiled for [packageName] and pushed only when the selected list differs from the
+     * one the helper holds; the generation is consumed only by a real push.
+     */
+    fun foreground(packageName: String?) {
+        scope.launch {
+            if (packageName == foreground) return@launch
+            foreground = packageName
+            if (helperLive) pushIfChanged()
+        }
+    }
 
     /** The helper said Ready: it is live, and it needs the current config at a fresh
      *  generation (every connection starts with no table). */
@@ -218,13 +252,14 @@ class ConfigStore(
         }
     }
 
-    /** The current config compiled at the next generation and offered; a config that does
-     *  not compile consumes the generation and is reported as [Event.PushFailed]. Shared by
-     *  [helperReady] and the end of [load]. On the store's thread. */
+    /** The current config compiled for the app in front at the next generation and offered;
+     *  a config that does not compile there consumes the generation and is reported as
+     *  [Event.PushFailed] — the helper keeps what it holds. Shared by [helperReady], the end
+     *  of [load] and [pushIfChanged]. On the store's thread. */
     private fun pushCurrent() {
         val next = generation + 1
         val table = try {
-            RuleCompiler.compile(_config.value.shortcuts, null, next)
+            RuleCompiler.compile(_config.value.shortcuts, foreground, next)
         } catch (e: IllegalArgumentException) {
             generation = next
             unsent += next
@@ -232,6 +267,13 @@ class ConfigStore(
             return
         }
         offer(table)
+    }
+
+    /** [pushCurrent], unless the list selected for the app in front is the one the helper
+     *  holds. Shared by [foreground] and [update]. On the store's thread. */
+    private fun pushIfChanged() {
+        if (RuleCompiler.select(_config.value.shortcuts, foreground) == sent) return
+        pushCurrent()
     }
 
     /** `T ok <gen> … installed|deferred`. An `installed` ack proves nothing older can fire
@@ -246,7 +288,12 @@ class ConfigStore(
                 onEvent(Event.UnexpectedAck(generation))
                 return@launch
             }
-            if (installed) tables = tables.installed(generation)
+            if (installed) {
+                tables = tables.installed(generation)
+                // A failed generation below an installed one is settled: an ack for it would
+                // change nothing either way, so it need not be kept (config review, H1-1).
+                unsent.removeAll { it < generation }
+            }
         }
     }
 
@@ -261,6 +308,9 @@ class ConfigStore(
         scope.launch {
             helperLive = false
             tables = RetainedTables()
+            // Nothing holds a table now, so the next live helper's first real push must not be
+            // skipped as unchanged — even after a reconnect whose own first push failed.
+            sent = null
         }
     }
 
@@ -275,6 +325,7 @@ class ConfigStore(
     private fun offer(table: CompiledTable) {
         generation = table.generation
         tables = tables.push(table)
+        sent = table.shortcuts
         try {
             push(table)
         } catch (e: RuntimeException) {

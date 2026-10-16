@@ -135,6 +135,16 @@ class ConflictDetectorTest {
     }
 
     @Test
+    fun `the reason names what two globals exclude, sorted`() {
+        val earlier = shortcut("swap", scope = Scope.Global(setOf(ra)))
+        val later = shortcut("close", scope = Scope.Global(setOf(dolphin)))
+        val c = assertNotNull(ConflictDetector.conflict(listOf(earlier), later))
+        assertEquals(Scope.Global(setOf(ra, dolphin)), c.where)
+        val reason = "'close' repeats the trigger of 'swap' everywhere except $ra, $dolphin"
+        assertEquals(reason, c.reason)
+    }
+
+    @Test
     fun `disjoint scopes, different triggers, or a disabled side are no conflict`() {
         val swap = listOf(shortcut("swap", scope = Scope.Global(setOf(ra))))
         assertNull(ConflictDetector.conflict(swap, shortcut("ra", scope = Scope.Apps(setOf(ra)))))

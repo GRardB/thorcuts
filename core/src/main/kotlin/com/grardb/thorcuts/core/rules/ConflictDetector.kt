@@ -37,7 +37,9 @@ object ConflictDetector {
          *  `Rejected`: the two ids (what the editor shows) and where they meet. */
         val reason: String
             get() = "'${later.id}' repeats the trigger of '${earlier.id}' " + when (where) {
-                is Scope.Global -> "everywhere"
+                is Scope.Global ->
+                    if (where.excluded.isEmpty()) "everywhere"
+                    else "everywhere except ${where.excluded.sorted().joinToString(", ")}"
                 is Scope.Apps -> "in ${where.included.sorted().joinToString(", ")}"
             }
     }
