@@ -117,4 +117,10 @@ class TriggerRecorderTest {
     fun `an event from a device slot the model does not know changes nothing`() {
         assertEquals(TriggerRecorder(), feed(HelperMessage.Event(7, EvdevType.KEY, 307, 1)))
     }
+
+    @Test
+    fun `a code outside a u16 changes nothing instead of throwing`() {
+        assertEquals(TriggerRecorder(), feed(key(-1, 1), key(0x10000, 1)))
+        assertEquals(feed(aynDown), feed(aynDown, key(-1, 1), hat(0x10000, -1)))
+    }
 }

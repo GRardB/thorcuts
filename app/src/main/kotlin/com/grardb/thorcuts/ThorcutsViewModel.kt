@@ -50,7 +50,10 @@ data class UiState(
  * A view of the holder, plus the one piece of state that is the screen's own: the editor's
  * draft. Everything with a lifetime lives in [ThorcutsCoordinator] (built once per process
  * by [ThorcutsApp]); every edit goes through `coordinator.update`, and the Shortcut is built
- * INSIDE the edit lambda so every model `require` comes back as one `Rejected(reason)`.
+ * INSIDE the edit lambda so every model `require` comes back as one `Rejected(reason)`. The
+ * writes run on [ThorcutsApp.writes], not this ViewModel's scope, so a Save survives the
+ * screen closing; one write at a time, so a second Save tap cannot run the add again against
+ * the config the first one wrote and report a refusal for a write that succeeded.
  * Recording is the coordinator's too; this ViewModel only starts it, copies the result into
  * the draft when the combo is released, and ends it — on the release, on close, and after
  * [RECORDING_TIMEOUT_MS] — so the helper's gate never stays shut behind a screen that is gone.
@@ -59,9 +62,15 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val coordinator = ThorcutsApp.of(app).coordinator
 
+    /** Process-lifetime and on main: a write outlives this ViewModel. See [ThorcutsApp.writes]. */
+    private val writes = ThorcutsApp.of(app).writes
+
     private val draft = MutableStateFlow<EditorDraft?>(null)
 
     private var timeout: Job? = null
+
+    /** True from a Save or Delete until its outcome returns. Read and written on main. */
+    private var writing = false
 
     private fun render(
         c: CoordinatorState,
@@ -140,7 +149,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     /** The row switch. A Rejected (enabling a parked duplicate) shows in the config line, as
      *  every rejected write does. */
     fun setShortcutEnabled(id: String, on: Boolean) {
-        viewModelScope.launch {
+        writes.launch {
             val outcome = coordinator.update { it.withEnabled(id, on) }
             Log.i(TAG, "EDIT ${if (on) "enabled" else "disabled"} $id -> ${outcome.text()}")
         }
@@ -182,27 +191,41 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         coordinator.stopRecording()
     }
 
+    /** Ignored while a write is in flight: a second tap would run the add again. */
     fun save() {
         val d = draft.value ?: return
+        if (writing) return
+        writing = true
         stopRecording()
-        viewModelScope.launch {
-            val outcome = coordinator.update { config ->
-                val s = d.toShortcut()
-                if (d.original == null) config.added(s) else config.replaced(s)
+        writes.launch {
+            try {
+                val outcome = coordinator.update { config ->
+                    val s = d.toShortcut()
+                    if (d.original == null) config.added(s) else config.replaced(s)
+                }
+                val verb = if (d.original == null) "added" else "replaced"
+                Log.i(TAG, "EDIT $verb ${d.id.trim()} -> ${outcome.text()}")
+                finish(outcome)
+            } finally {
+                writing = false
             }
-            val verb = if (d.original == null) "added" else "replaced"
-            Log.i(TAG, "EDIT $verb ${d.id.trim()} -> ${outcome.text()}")
-            finish(outcome)
         }
     }
 
+    /** Ignored while a write is in flight, like [save]. */
     fun delete() {
         val id = draft.value?.original?.id ?: return
+        if (writing) return
+        writing = true
         stopRecording()
-        viewModelScope.launch {
-            val outcome = coordinator.update { it.without(id) }
-            Log.i(TAG, "EDIT removed $id -> ${outcome.text()}")
-            finish(outcome)
+        writes.launch {
+            try {
+                val outcome = coordinator.update { it.without(id) }
+                Log.i(TAG, "EDIT removed $id -> ${outcome.text()}")
+                finish(outcome)
+            } finally {
+                writing = false
+            }
         }
     }
 

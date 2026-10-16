@@ -36,6 +36,10 @@ data class TriggerRecorder(
     fun feed(event: HelperMessage.Event): TriggerRecorder {
         if (complete) return this
         val device = Device.entries.firstOrNull { it.slot == event.device } ?: return this
+        // A code outside a u16 cannot come from our helper (it prints a uint16_t), but the
+        // protocol does not range-check an `E` line and Control.init would throw — out of
+        // the supervisor's reader thread, which would drop the helper. Ignore it instead.
+        if (event.code !in 0..0xFFFF) return this
         return when (event.type) {
             EvdevType.KEY -> when (event.value) {
                 1 -> down(Control(device, EvdevType.KEY, event.code, 1))

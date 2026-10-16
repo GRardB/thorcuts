@@ -10,6 +10,9 @@ import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.log.AndroidLogger
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
 import com.grardb.thorcuts.platform.tasks.HomePackages
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * The process: builds the one [ThorcutsCoordinator] with its real collaborators and holds it
@@ -22,6 +25,15 @@ class ThorcutsApp : Application() {
 
     lateinit var coordinator: ThorcutsCoordinator
         private set
+
+    /**
+     * Where the screen's writes run: process-lifetime, on main, never cancelled — so a Save
+     * survives the screen that made it closing before the store's hop (the editor's final
+     * review, E5-3). Not the coordinator's privileged scope: a config write must not wait
+     * behind a stop that can block for seconds (config spec), and the store hops to its own
+     * thread anyway; this scope only carries the call and its outcome.
+     */
+    val writes: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()

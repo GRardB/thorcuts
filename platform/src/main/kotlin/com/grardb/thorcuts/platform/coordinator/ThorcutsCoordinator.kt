@@ -102,7 +102,7 @@ data class CoordinatorState(
  * a screen that is gone.
  */
 class ThorcutsCoordinator(
-    val gateway: PrivilegeGateway,
+    private val gateway: PrivilegeGateway,
     /**
      * Builds the channel around the callback its messages come back through. The real one
      * is `{ cb -> HelperSupervisor(app, gateway, cb) }`, which needs the callback at
@@ -130,7 +130,7 @@ class ThorcutsCoordinator(
     /** The store's thread; null means its own single thread. A test passes Unconfined. */
     storeDispatcher: CoroutineDispatcher? = null,
 ) {
-    val tasks: TaskActions = TaskActions(gateway, thorcutsMain, homePackages)
+    private val tasks: TaskActions = TaskActions(gateway, thorcutsMain, homePackages)
     private val dispatcher = ActionDispatcher(tasks)
     private val helper: HelperChannel = channel(::onHelperMessage)
 
@@ -229,9 +229,10 @@ class ThorcutsCoordinator(
     /**
      * Perform [action] now, on the calling thread — Privilege.dispatcher, as every
      * [TaskActions] call requires — and record its outcome as `<line> (<label>)`. A fire
-     * calls it with the shortcut's id.
+     * calls it with the shortcut's id; nothing outside this module does since the diagnostics
+     * screen went (its test still does).
      */
-    fun run(action: Action, label: String): String {
+    internal fun run(action: Action, label: String): String {
         val outcome = dispatcher.dispatch(action)
         _state.update { it.copy(lastOutcome = "$outcome ($label)") }
         return outcome
