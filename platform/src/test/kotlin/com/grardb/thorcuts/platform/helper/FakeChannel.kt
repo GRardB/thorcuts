@@ -7,8 +7,9 @@ import com.grardb.thorcuts.core.rules.CompiledTable
  * A [HelperChannel] that records what the coordinator asked of it and lets a test play the
  * helper: [emit] delivers a message through the callback the channel was built with, from
  * the test thread, as the supervisor's reader thread would. [outcome] is what [start]
- * answers; [onStart] runs inside [start] and [onStop] inside [stop], so a test can lose the
- * helper mid-start, or have it exit during a requested stop.
+ * answers; [onStart] runs inside [start] (every call: a relaunch starts again), [onStop]
+ * inside [stop] and [onPush] inside [pushTable], so a test can lose the helper mid-start,
+ * have it exit during a requested stop, or make a push throw.
  */
 class FakeChannel(private val onMessage: (HelperMessage) -> Unit) : HelperChannel {
 
@@ -18,6 +19,7 @@ class FakeChannel(private val onMessage: (HelperMessage) -> Unit) : HelperChanne
     var outcome = HelperChannel.Start.STARTED
     var onStart: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
+    var onPush: ((CompiledTable) -> Unit)? = null
 
     override fun start(): HelperChannel.Start {
         calls += "start"
@@ -32,6 +34,7 @@ class FakeChannel(private val onMessage: (HelperMessage) -> Unit) : HelperChanne
 
     override fun pushTable(table: CompiledTable) {
         pushed += table
+        onPush?.invoke(table)
     }
 
     override fun setCapture(on: Boolean) {

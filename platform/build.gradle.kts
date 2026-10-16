@@ -35,6 +35,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.20")
+    // The queued-dispatcher pass over the coordinator (ThorcutsCoordinatorQueuedTest); the
+    // same version as kotlinx-coroutines-android above.
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

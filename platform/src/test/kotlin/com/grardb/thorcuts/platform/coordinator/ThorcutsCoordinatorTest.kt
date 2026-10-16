@@ -1,12 +1,19 @@
 package com.grardb.thorcuts.platform.coordinator
 
+import com.grardb.thorcuts.core.config.ConfigCodec
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
 import com.grardb.thorcuts.core.config.Defaults
+import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.Control
+import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
 import com.grardb.thorcuts.core.model.ModifierKey
+import com.grardb.thorcuts.core.model.Shortcut
+import com.grardb.thorcuts.core.model.Trigger
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
+import com.grardb.thorcuts.core.rules.RuleCompiler
 import com.grardb.thorcuts.platform.config.MemoryConfigFile
 import com.grardb.thorcuts.platform.helper.FakeChannel
 import com.grardb.thorcuts.platform.helper.HelperChannel
@@ -427,6 +434,82 @@ class ThorcutsCoordinatorTest {
         assertIs<UpdateOutcome.Rejected>(outcome)
         assertEquals("config: write rejected: nope", c.state.value.configState)
         assertTrue(log.has("CONFIG_WRITE_REJECTED nope"))
+    }
+
+    // ── the branches no test exercised (H3-5) ─────────────────────────────────────────
+
+    @Test
+    fun `a Log line that is not the disconnect becomes the helper line`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Log("launching helper…"))
+        assertEquals("launching helper…", c.state.value.helperState)
+        assertTrue(c.state.value.running)
+        assertEquals(listOf(true), held)
+        assertEquals(listOf("start"), channel.calls)            // not a loss: no relaunch
+        assertFalse(log.has("HELPER_LOST"))
+    }
+
+    @Test
+    fun `a rejected table is shown, logged and rowed`() {
+        val c = ready()
+        channel.emit(HelperMessage.TableRejected(1, "bad rule"))
+        assertEquals("table gen 1 REJECTED: bad rule", c.state.value.tableState)
+        assertTrue(log.has("TABLE_REJECTED gen=1 reason=bad rule"))
+        assertEquals("TABLE gen 1 REJECTED: bad rule", c.state.value.eventLog.first())
+    }
+
+    @Test
+    fun `a config that does not compile is NOT PUSHED on Ready`() {
+        // One over the table's cap: loads (nothing refuses it on disk), compiles on Ready
+        // into a PushFailed. Codes clear of the five modifiers.
+        val many = ThorcutsConfig((0..RuleCompiler.MAX_RULES).map { i ->
+            Shortcut(
+                id = "s$i",
+                trigger = Trigger(
+                    modifiers = setOf(ModifierKey.AYN),
+                    buttons = setOf(Control(Device.PAD, EvdevType.KEY, 400 + i, 1)),
+                ),
+                action = Action.SwapScreens,
+            )
+        })
+        file.text = ConfigCodec.encode(many)
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(1))
+        assertTrue(channel.pushed.isEmpty())
+        assertTrue(log.has("TABLE_PUSH_FAILED gen=1: 65 shortcuts apply here"))
+        assertTrue(c.state.value.tableState.startsWith("table gen 1 NOT PUSHED: "))
+        assertTrue(c.state.value.eventLog.first().startsWith("TABLE gen 1 NOT PUSHED: "))
+    }
+
+    @Test
+    fun `an ack for a generation never pushed is logged as unexpected`() {
+        val c = ready()                                         // gen 1 pushed
+        channel.emit(HelperMessage.TableAccepted(99, 1, true))
+        assertTrue(log.has("TABLE_ACK gen=99 matches no pushed table"))
+    }
+
+    @Test
+    fun `a push that throws is a CONFIG_FAILURE, not a crash`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.onPush = { throw IllegalStateException("socket") }
+        channel.emit(HelperMessage.Ready(1))
+        assertTrue(log.has("CONFIG_FAILURE: java.lang.IllegalStateException: socket"))
+        assertTrue(c.state.value.eventLog.first().startsWith("CONFIG FAILURE: "))
+        assertTrue(c.state.value.running)                       // the holder is unharmed
+        assertTrue(c.state.value.helperLive)
+        assertEquals(1, channel.pushed.size)                    // the table stays retained
+    }
+
+    @Test
+    fun `an applied write is logged and shown as written`() {
+        val c = coordinator()
+        val outcome = runBlocking { c.update(swapOff) }
+        assertIs<UpdateOutcome.Applied>(outcome)
+        assertTrue(log.has("CONFIG_WRITE shortcuts=1"))
+        assertEquals("config: 1 shortcut(s), written", c.state.value.configState)
     }
 
     // ── the recorder ──────────────────────────────────────────────────────────────────
