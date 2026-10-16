@@ -41,6 +41,9 @@ class ThorcutsCoordinatorTest {
     private val log = RecordingLogger()
     private lateinit var channel: FakeChannel
 
+    /** The relaunch chain's clock, in milliseconds; a test moves it. */
+    private var now = 0L
+
     private val swapOff: (com.grardb.thorcuts.core.config.ThorcutsConfig) ->
         com.grardb.thorcuts.core.config.ThorcutsConfig =
         { it.withEnabled("swap-screens", false) }
@@ -56,6 +59,7 @@ class ThorcutsCoordinatorTest {
         log = log,
         privileged = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         storeDispatcher = Dispatchers.Unconfined,
+        clock = { now },
     )
 
     // ── construction and the switch ───────────────────────────────────────────────────
@@ -152,17 +156,28 @@ class ThorcutsCoordinatorTest {
         assertTrue(c.state.value.enabled)
         assertNull(c.state.value.transition)
         assertTrue(log.has("HELPER_START outcome=ALREADY_RUNNING"))
+        channel.outcome = HelperChannel.Start.STARTED
+        c.ensureRunning()                                       // the next open starts again
+        assertEquals(listOf("start", "start"), channel.calls)
+        assertEquals(listOf(true, false, true), held)
+        assertTrue(c.state.value.running)
     }
 
     @Test
-    fun `a helper lost during the start stays lost when the start returns`() {
+    fun `a helper lost during the start is relaunched by an attempt queued behind it`() {
         val c = coordinator()
-        channel.onStart = { channel.emit(HelperMessage.Log(HelperSupervisor.DISCONNECTED)) }
+        var starts = 0
+        channel.onStart = {
+            if (++starts == 1) channel.emit(HelperMessage.Log(HelperSupervisor.DISCONNECTED))
+        }
         c.setEnabled(true)
-        assertFalse(c.state.value.running)
+        assertEquals(listOf("start", "start"), channel.calls)
+        assertTrue(c.state.value.running)
+        assertFalse(c.state.value.helperLive)
         assertEquals("helper disconnected", c.state.value.helperState)
-        assertEquals(listOf(true, false), held)
+        assertEquals(listOf(true), held)                        // never released
         assertNull(c.state.value.transition)
+        assertTrue(log.has("RELAUNCH after helper disconnected"))
     }
 
     @Test
@@ -197,6 +212,8 @@ class ThorcutsCoordinatorTest {
         assertEquals("exited: stop requested", c.state.value.helperState)
         assertNull(c.state.value.transition)
         assertTrue(log.has("HELPER_STOP done"))
+        assertEquals(listOf("start", "stop"), channel.calls)    // no relaunch: the stop owns it
+        assertFalse(log.has("RELAUNCH"))
     }
 
     // ── the helper's messages ─────────────────────────────────────────────────────────
@@ -263,21 +280,132 @@ class ThorcutsCoordinatorTest {
         assertTrue(log.has("FIRE_UNRESOLVED gen=1"))
         c.ensureRunning()                                       // off: nothing starts
         assertEquals(listOf("start"), channel.calls)
+        assertFalse(log.has("RELAUNCH"))
     }
 
     @Test
-    fun `any other loss releases and leaves the switch on for the next start`() {
+    fun `a first unasked loss relaunches without releasing`() {
         val c = coordinator()
         c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(1))
+        var seen: String? = null
+        channel.onStart = { seen = c.state.value.transition }   // the relaunch's start
         channel.emit(HelperMessage.Exiting("signal"))
         assertTrue(switch.on)
         assertTrue(c.state.value.enabled)
-        assertFalse(c.state.value.running)
+        assertTrue(c.state.value.running)                       // the switch reads ON
+        assertFalse(c.state.value.helperLive)
         assertEquals("exited: signal", c.state.value.helperState)
-        assertEquals(listOf(true, false), held)
-        c.ensureRunning()                                       // the next open starts it
+        assertEquals("no table (helper not running)", c.state.value.tableState)
+        assertEquals(listOf(true), held)                        // never released
         assertEquals(listOf("start", "start"), channel.calls)
+        assertEquals("restarting…", seen)
+        assertNull(c.state.value.transition)
+        assertTrue(log.has("RELAUNCH after exited: signal"))
+        assertEquals("RELAUNCH after exited: signal", c.state.value.eventLog.first())
+        c.ensureRunning()                                       // nothing to do: running
+        assertEquals(listOf("start", "start"), channel.calls)
+        channel.emit(HelperMessage.Ready(1))                    // the relaunched helper
+        assertTrue(c.state.value.helperLive)
+        assertEquals(2, channel.pushed.last().generation)       // a fresh generation
+    }
+
+    @Test
+    fun `a second loss within a minute gives up - the switch goes off with the reason`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        now = 1_000
+        channel.emit(HelperMessage.Exiting("signal"))          // relaunched
+        now = 60_000
+        channel.emit(HelperMessage.Exiting("signal"))          // 59 s later: the chain
+        assertFalse(switch.on)
+        assertEquals(listOf(true, false), switch.writes)
+        assertFalse(c.state.value.enabled)
+        assertFalse(c.state.value.running)
+        assertFalse(c.state.value.helperLive)
+        assertEquals("gave up: exited: signal, twice in a minute", c.state.value.helperState)
+        assertEquals(listOf(true, false), held)
+        assertEquals(listOf("start", "start"), channel.calls)
+        assertNull(c.state.value.transition)
+        assertTrue(log.has("RELAUNCH gave up: exited: signal"))
+        assertTrue(log.has("SWITCH on=false by=gave-up"))
+        assertEquals("GAVE UP: exited: signal", c.state.value.eventLog.first())
+        val off = log.lines.indexOfFirst { "SWITCH on=false by=gave-up" in it }
+        val release = log.lines.indexOfLast { "KEEPER release" in it }
+        assertTrue(off in 0 until release)                      // persisted before the release
+        c.ensureRunning()                                       // off: nothing starts
+        assertEquals(listOf("start", "start"), channel.calls)
+    }
+
+    @Test
+    fun `a loss after a quiet minute is a new chain`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        now = 1_000
+        channel.emit(HelperMessage.Exiting("signal"))
+        now = 61_000                                            // exactly a minute later
+        channel.emit(HelperMessage.Exiting("signal"))
+        assertTrue(switch.on)
+        assertTrue(c.state.value.running)
+        assertEquals(listOf("start", "start", "start"), channel.calls)
+        assertEquals(listOf(true), held)
+    }
+
+    @Test
+    fun `a user-driven start resets the chain`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        now = 1_000
+        channel.emit(HelperMessage.Exiting("signal"))          // relaunched
+        now = 30_000
+        channel.emit(HelperMessage.Exiting("signal"))          // gave up: off
+        assertFalse(c.state.value.enabled)
+        now = 31_000
+        c.setEnabled(true)                                      // the user tries again
+        assertEquals(listOf("start", "start", "start"), channel.calls)
+        now = 32_000
+        channel.emit(HelperMessage.Exiting("signal"))          // 2 s after the last loss
+        assertTrue(c.state.value.enabled)                       // relaunched, not given up
+        assertTrue(c.state.value.running)
+        assertEquals(listOf("start", "start", "start", "start"), channel.calls)
         assertEquals(listOf(true, false, true), held)
+    }
+
+    @Test
+    fun `a relaunch whose own start fails gives up`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.outcome = HelperChannel.Start.NOT_BOUND         // the relaunch's start
+        channel.emit(HelperMessage.Exiting("signal"))
+        assertEquals(listOf("start", "start"), channel.calls)
+        assertFalse(switch.on)
+        assertFalse(c.state.value.enabled)
+        assertFalse(c.state.value.running)
+        assertEquals("gave up: could not bind the helper socket", c.state.value.helperState)
+        assertEquals(listOf(true, false), held)
+        assertNull(c.state.value.transition)
+        assertTrue(log.has("RELAUNCH gave up: could not bind the helper socket"))
+        assertTrue(log.has("SWITCH on=false by=gave-up"))
+        val off = log.lines.indexOfFirst { "SWITCH on=false by=gave-up" in it }
+        val release = log.lines.indexOfLast { "KEEPER release" in it }
+        assertTrue(off in 0 until release)                      // persisted before the release
+    }
+
+    @Test
+    fun `a loss that finds nothing running releases and does not relaunch`() {
+        val c = coordinator()
+        channel.outcome = HelperChannel.Start.ALREADY_RUNNING
+        c.setEnabled(true)                                      // the start gave up waiting
+        assertFalse(c.state.value.running)
+        assertEquals(listOf(true, false), held)
+        channel.emit(HelperMessage.Log(HelperSupervisor.DISCONNECTED))  // the old session's
+        assertFalse(c.state.value.running)
+        assertTrue(c.state.value.enabled)
+        assertEquals("helper disconnected", c.state.value.helperState)
+        assertEquals(listOf("start"), channel.calls)            // no relaunch
+        assertEquals(listOf(true, false, false), held)          // released again, harmlessly
+        assertFalse(log.has("RELAUNCH"))
+        assertNull(c.state.value.transition)
     }
 
     @Test
@@ -286,7 +414,10 @@ class ThorcutsCoordinatorTest {
         c.setEnabled(true)
         channel.emit(HelperMessage.Exiting("signal"))
         assertTrue(log.has("HELPER_LOST exited: signal"))
-        assertEquals("HELPER exited: signal", c.state.value.eventLog.first())
+        assertEquals(
+            listOf("RELAUNCH after exited: signal", "HELPER exited: signal"),
+            c.state.value.eventLog.take(2),
+        )
     }
 
     @Test
@@ -384,9 +515,27 @@ class ThorcutsCoordinatorTest {
             channel.emit(loss)
             assertNull(c.recording.value)
             assertFalse(c.state.value.helperLive)
-            assertEquals(listOf("start", "capture on"), channel.calls)    // no "capture off"
+            // The loss relaunches (a second start) and sends no "capture off".
+            assertEquals(listOf("start", "capture on", "start"), channel.calls)
             c.stopRecording()                                   // the UI's backstop: nothing
-            assertEquals(listOf("start", "capture on"), channel.calls)
+            assertEquals(listOf("start", "capture on", "start"), channel.calls)
+            channel.emit(HelperMessage.Ready(1))                // the relaunched helper
+            assertTrue(c.state.value.helperLive)                // Record is offered again
+            assertEquals(listOf("start", "capture on", "start"), channel.calls)  // no re-send
         }
+    }
+
+    @Test
+    fun `startRecording with the helper not live is ignored`() {
+        val c = ready()
+        channel.emit(HelperMessage.Exiting("signal"))          // relaunched, not yet ready
+        c.startRecording()
+        assertNull(c.recording.value)
+        assertEquals(listOf("start", "start"), channel.calls)   // no "capture on"
+        assertTrue(log.has("CAPTURE on ignored: helper not live"))
+        channel.emit(HelperMessage.Ready(1))
+        c.startRecording()                                      // live again: a recording
+        assertEquals(TriggerRecorder(), c.recording.value)
+        assertEquals(listOf("start", "start", "capture on"), channel.calls)
     }
 }

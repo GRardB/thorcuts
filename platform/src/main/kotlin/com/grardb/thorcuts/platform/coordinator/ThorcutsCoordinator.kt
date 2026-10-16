@@ -27,7 +27,12 @@ private const val NO_TABLE = "no table"
 private const val NO_TABLE_NO_HELPER = "no table (helper not running)"
 private const val LOG_ROWS = 40
 private const val STARTING = "starting…"
+private const val RESTARTING = "restarting…"
 private const val STOPPING = "stopping…"
+
+/** A loss within this of the previous one gives up instead of relaunching — the owner's one
+ *  relaunch per chain; a quiet minute, or any user-driven start, forgives. */
+private const val RELAUNCH_WINDOW_MS = 60_000L
 
 /** The helper's exit reason for the hardwired combo: native/src/main.c's `leave("panic combo")`,
  *  carried as `X panic combo`. */
@@ -44,16 +49,19 @@ data class CoordinatorState(
     /** The persisted switch: shortcuts are wanted on. */
     val enabled: Boolean,
     /**
-     * A start has been decided and no stop or loss has followed. Set when the start is
-     * DECIDED, not when it completes: a helper lost during the blocking start must not be
-     * resurrected by that start returning.
+     * A start has been decided and no stop, give-up or final loss has followed. Set when the
+     * start is DECIDED, not when it completes: a helper lost during the blocking start must
+     * not be resurrected by that start returning. Stays true through a relaunch, so the
+     * switch reads ON and [ThorcutsCoordinator.ensureRunning] does nothing while one is
+     * pending.
      */
     val running: Boolean = false,
     /** True between the helper's Ready and its loss: the one yes/no the editor's Record
      *  button needs ([helperState]'s text is overwritten by every later line). */
     val helperLive: Boolean = false,
-    /** "starting…" / "stopping…" while a blocking start or stop is in flight — the switch
-     *  button is disabled on it, and so is every other caller — and null otherwise. */
+    /** "starting…" / "restarting…" / "stopping…" while a blocking start, relaunch or stop is
+     *  in flight — the switch button is disabled on it, and so is every other caller — and
+     *  null otherwise. */
     val transition: String? = null,
     val helperState: String = "not started",
     /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
@@ -91,9 +99,13 @@ data class CoordinatorState(
  * it to its foreground service) and starts the helper; false stops the helper and then
  * releases. [ensureRunning] is the start half when the switch is on and nothing runs — the
  * one entry for the Activity, the boot receiver and a sticky restart of the service. A
- * helper that goes away unasked releases the process and leaves the switch on, so the next
- * open or boot starts it again; the panic combo turns the switch off, because the user
- * asked for the controller back and nothing may re-grab it until they say so.
+ * helper that goes away unasked is RELAUNCHED once: the process stays held (a hold cannot be
+ * re-issued from a process with nothing on screen), the switch reads "restarting…", and a
+ * start is queued on the privileged thread, where the supervisor waits for the dying
+ * session's socket before binding. A second loss within a minute of the previous one gives
+ * up: the switch goes OFF with the reason, as the panic combo turns it off — the user asked
+ * for the controller back, or the helper could not stay up, and nothing may re-grab it
+ * until they say so. Any user-driven start forgives the chain.
  *
  * The recorder. [startRecording] holds the helper in capture mode — every raw event comes up
  * and feeds [recording], nothing but the panic goes out — exactly while [recording] is
@@ -129,6 +141,8 @@ class ThorcutsCoordinator(
     private val privileged: CoroutineScope = Privilege.scope,
     /** The store's thread; null means its own single thread. A test passes Unconfined. */
     storeDispatcher: CoroutineDispatcher? = null,
+    /** Monotonic milliseconds, for the relaunch chain. A test passes its own. */
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val tasks: TaskActions = TaskActions(gateway, thorcutsMain, homePackages)
     private val dispatcher = ActionDispatcher(tasks)
@@ -167,6 +181,15 @@ class ThorcutsCoordinator(
      */
     private var switchEpoch = 0
 
+    /** When the last unasked loss was decided, by [clock], or null when no chain is open: a
+     *  loss within [RELAUNCH_WINDOW_MS] of it gives up. Under the monitor. */
+    private var lastLossAt: Long? = null
+
+    /** A relaunch is queued and not yet begun: the attempt whose helper was lost keeps the
+     *  transition for it ([endTransition]), and a failed start withdraws it. Under the
+     *  monitor. */
+    private var relaunchOwed = false
+
     init {
         // The one-time load. The store hops to its own thread inside load(), so this parks
         // nothing; a start calls load() again — idempotent, queued on the store's single
@@ -178,6 +201,11 @@ class ThorcutsCoordinator(
 
     /** What a decision saw and decided, and the switch epoch it left behind. */
     private class Decision(val verdict: Verdict, val seen: CoordinatorState, val epoch: Int)
+
+    private enum class Loss { STOPPING, RELEASE, RELAUNCH, GIVE_UP }
+
+    /** What a loss decided, and the switch epoch a give-up's write carries. */
+    private class LossDecision(val verdict: Loss, val epoch: Int)
 
     /**
      * Persist the switch and act on it. Returns at once. Call it on the MAIN thread, as every
@@ -250,6 +278,7 @@ class ThorcutsCoordinator(
 
     /**
      * Start recording, or start over: a fresh recorder, and the helper asked for capture.
+     * Nothing, with a log line, while the helper is not live.
      * The state write and the queued send are not one step, so every start and stop must come
      * from ONE thread — the UI's main, as every caller does; [lost] is the one other writer
      * and sends nothing. The send is queued on the privileged thread — a socket write, never
@@ -257,6 +286,14 @@ class ThorcutsCoordinator(
      * queued after it. Dropped by the channel when nothing is connected.
      */
     fun startRecording() {
+        if (!_state.value.helperLive) {
+            // The UI offers Record only while the helper is live; this closes the race with
+            // a loss landing between the render and the tap, and the window a relaunch
+            // opens. The ViewModel's timeout then ends a recording that never began: a
+            // no-op.
+            log.w("CAPTURE on ignored: helper not live")
+            return
+        }
         _recording.value = TriggerRecorder()
         log.i("CAPTURE on")
         privileged.launch { helper.setCapture(true) }
@@ -299,6 +336,8 @@ class ThorcutsCoordinator(
             }
         }
         if (switchOn && verdict != Verdict.IGNORED) switchEpoch++
+        // A user asking for a start always gets the full relaunch budget.
+        if (verdict == Verdict.START) lastLossAt = null
         return Decision(verdict, seen, switchEpoch)
     }
 
@@ -340,39 +379,83 @@ class ThorcutsCoordinator(
     /** The start itself: hold the process, then bind and launch on the privileged thread. */
     private fun begin() {
         hold()
-        privileged.launch {
-            try {
-                // Awaits the one-time load: idempotent, so a load that threw once is retried
-                // here rather than poisoning every later start.
-                store.load()
-                val outcome = helper.start()
-                log.i("HELPER_START outcome=$outcome")
-                val failed = when (outcome) {
-                    HelperChannel.Start.STARTED -> null
-                    HelperChannel.Start.NOT_BOUND -> "could not bind the helper socket"
-                    // The coordinator only asks when it holds no session, so this names the
-                    // supervisor's one race: the previous session's terminal message was
-                    // delivered before its session flag reset. Not a start.
-                    HelperChannel.Start.ALREADY_RUNNING ->
-                        "the previous helper session was still winding down; start again"
-                }
-                if (failed != null) {
+        privileged.launch { attempt(relaunch = false) }
+    }
+
+    /**
+     * One start on the privileged thread. A relaunch holds nothing — the process never let
+     * go — and is skipped when the owed relaunch was withdrawn by a failed start queued ahead
+     * of it. Two BLOCKING starts never overlap (one thread, FIFO); an attempt does yield the
+     * thread at `store.load()` (a hop to the store's thread), so a relaunch queued in that
+     * window runs interleaved with it, and the transition is ended by whichever attempt
+     * finishes with no relaunch owed.
+     */
+    private suspend fun attempt(relaunch: Boolean) {
+        if (relaunch && !takeOwed()) return
+        try {
+            // Awaits the one-time load: idempotent, so a load that threw once is retried
+            // here rather than poisoning every later start.
+            store.load()
+            val outcome = helper.start()
+            log.i("HELPER_START outcome=$outcome")
+            val failed = when (outcome) {
+                HelperChannel.Start.STARTED -> null
+                HelperChannel.Start.NOT_BOUND -> "could not bind the helper socket"
+                // The coordinator only asks when it holds no session, so this names a dying
+                // session that did not end within the supervisor's wait. Not a start.
+                HelperChannel.Start.ALREADY_RUNNING ->
+                    "the previous helper session was still winding down; start again"
+            }
+            if (failed != null) {
+                withdrawOwed()
+                if (relaunch) {
+                    giveUp(failed)
+                } else {
                     _state.update { it.copy(running = false, helperState = failed) }
                     release()
                 }
-            } catch (t: Throwable) {
-                // Unreachable by any path that exists today — load() catches its own I/O and
-                // start() reports failures as messages — but if it ever is, the state must not
-                // claim a helper that never started: say so, release, and let the scope's
-                // handler log the throw.
-                _state.update { it.copy(running = false, helperState = "start failed: $t") }
-                release()
-                throw t
-            } finally {
-                // Whatever happened, the transition ends, or the switch button stays disabled.
-                _state.update { it.copy(transition = null) }
             }
+        } catch (t: Throwable) {
+            // Unreachable by any path that exists today — load() catches its own I/O and
+            // start() reports failures as messages — but if it ever is, the state must not
+            // claim a helper that never started: say so, release, and let the scope's
+            // handler log the throw.
+            withdrawOwed()
+            _state.update { it.copy(running = false, helperState = "start failed: $t") }
+            release()
+            throw t
+        } finally {
+            // Whatever happened, the transition ends — or the switch button stays disabled —
+            // unless a relaunch queued behind this attempt inherits it.
+            endTransition()
         }
+    }
+
+    @Synchronized
+    private fun takeOwed(): Boolean = relaunchOwed.also { relaunchOwed = false }
+
+    @Synchronized
+    private fun withdrawOwed() {
+        relaunchOwed = false
+    }
+
+    /** The attempt is over: the transition ends unless a relaunch is owed, in which case the
+     *  attempt queued behind this one ends it. Under the monitor with [decideLoss], so a loss
+     *  cannot land between the check and the clear. */
+    @Synchronized
+    private fun endTransition() {
+        if (!relaunchOwed) _state.update { it.copy(transition = null) }
+    }
+
+    /** A relaunch whose own start failed: the switch goes off with the reason, as a second
+     *  loss would turn it off, and the process is released. */
+    private fun giveUp(reason: String) {
+        val epoch = switchOff()
+        _state.update { it.copy(running = false, helperState = "gave up: $reason") }
+        log.w("RELAUNCH gave up: $reason")
+        row("GAVE UP: $reason")
+        writeSwitch(false, epoch, by = "gave-up")
+        release()
     }
 
     private fun hold() {
@@ -386,25 +469,85 @@ class ThorcutsCoordinator(
     }
 
     /**
-     * The helper is gone, asked or not: nothing runs. The process is released unless a stop
-     * owns the transition — its `finally` releases once the pad is back, so a UI-less process
-     * is not left cached during the one window where the pad may still be renumbered.
+     * The helper is gone, asked or not: nothing runs. Decided under the monitor
+     * ([decideLoss]); the keeper and the switch write run outside it, as everywhere. A stop
+     * that owns the transition releases in its own `finally`, once the pad is back, so a
+     * UI-less process is not left cached while the pad may still be renumbered; the panic
+     * has already turned the switch off, so it releases here; an unasked loss with the
+     * switch on is relaunched or, within a minute of the previous one, given up on.
      */
     private fun lost(helperState: String) {
         log.w("HELPER_LOST $helperState")
         row("HELPER $helperState")
-        var stopping = false
-        _state.update {
-            stopping = it.transition == STOPPING
-            it.copy(
-                running = false, helperLive = false, helperState = helperState,
-                tableState = NO_TABLE_NO_HELPER,
-            )
-        }
         // Nothing left to listen to: the gate went with the helper, and the editor's
         // recording block must not keep asking for a combo. No send — nothing is connected.
         _recording.value = null
-        if (!stopping) release()
+        val d = decideLoss(helperState)
+        when (d.verdict) {
+            Loss.STOPPING -> Unit
+            Loss.RELEASE -> release()
+            Loss.RELAUNCH -> privileged.launch { attempt(relaunch = true) }
+            Loss.GIVE_UP -> {
+                // Persisted BEFORE the release, as the panic's OFF is: once the service is
+                // gone a UI-less process may die at any moment.
+                writeSwitch(false, d.epoch, by = "gave-up")
+                release()
+            }
+        }
+    }
+
+    /**
+     * The loss's decision, inside the state's CAS and under the monitor: STOPPING when a stop
+     * owns the transition; RELEASE when the switch is already off (the panic) or nothing runs
+     * (a message from a session this holder has already given up on — a start that timed out
+     * waiting for it, a stop that timed out — finds nothing held, so there is nothing to
+     * relaunch into: it releases as it always did); else the chain — RELAUNCH for the first
+     * loss, or one at least [RELAUNCH_WINDOW_MS] after the previous, GIVE_UP for a second
+     * within it. A relaunch keeps `running` (the switch reads
+     * ON; ensureRunning does nothing), shows "restarting…" unless a start is in flight (whose
+     * attempt then keeps its own transition for the relaunch queued behind it) and marks the
+     * relaunch owed. A give-up turns the switch off at a fresh epoch.
+     */
+    @Synchronized
+    private fun decideLoss(helperState: String): LossDecision {
+        val now = clock()
+        var verdict = Loss.RELEASE
+        _state.update { s ->
+            verdict = when {
+                s.transition == STOPPING -> Loss.STOPPING
+                !s.enabled || !s.running -> Loss.RELEASE
+                lastLossAt.let { it != null && now - it < RELAUNCH_WINDOW_MS } -> Loss.GIVE_UP
+                else -> Loss.RELAUNCH
+            }
+            val gone = s.copy(
+                helperLive = false, helperState = helperState, tableState = NO_TABLE_NO_HELPER,
+            )
+            when (verdict) {
+                Loss.RELAUNCH -> gone.copy(transition = s.transition ?: RESTARTING)
+                Loss.GIVE_UP -> gone.copy(
+                    enabled = false, running = false,
+                    helperState = "gave up: $helperState, twice in a minute",
+                )
+                else -> gone.copy(running = false)
+            }
+        }
+        when (verdict) {
+            Loss.RELAUNCH -> {
+                lastLossAt = now
+                relaunchOwed = true
+                log.i("RELAUNCH after $helperState")
+                row("RELAUNCH after $helperState")
+            }
+            Loss.GIVE_UP -> {
+                lastLossAt = now
+                relaunchOwed = false
+                switchEpoch++
+                log.w("RELAUNCH gave up: $helperState")
+                row("GAVE UP: $helperState")
+            }
+            else -> Unit
+        }
+        return LossDecision(verdict, switchEpoch)
     }
 
     /** On the supervisor's reader thread. */
@@ -417,15 +560,15 @@ class ThorcutsCoordinator(
                 // it — on Ready, never earlier (HelperSupervisor.pushTable says why). A
                 // config that does not compile comes back as a PushFailed event.
                 store.helperReady()
-                // A helper that came up during a recording starts in match mode. The UI
-                // offers Record only while helperLive, so this guards a start that overlaps
-                // a recording, not the normal path.
+                // A helper that came up during a recording starts in match mode. A recording
+                // needs a live helper (startRecording) and a loss clears it, so no path
+                // reaches this today; it stays as the backstop of the invariant — capture
+                // mode exactly while recording — and its test pins it.
                 if (_recording.value != null) privileged.launch { helper.setCapture(true) }
             }
             is HelperMessage.Log -> {
                 // The disconnect line is the one Log that means "no helper": it went away
-                // without saying why (a crash, a kill). Nothing relaunches it; the switch
-                // stays on, so the next open or boot does.
+                // without saying why (a crash, a kill). lost() decides what follows.
                 if (message.text == HelperSupervisor.DISCONNECTED) {
                     store.helperGone()
                     lost(message.text)
