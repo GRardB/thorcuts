@@ -228,12 +228,12 @@ class ConfigCodecTest {
             swap.replace(oneButton, (304..308).joinToString(",", "[", "]") { button(it) })
                 to "at most 4 buttons",
             swap.replace(""""code":307""", """"code":314""")
-                to "a modifier cannot also be a button",
-            swap.replace(""","holdMs":400""", "") to "HOLD needs holdMs",
+                to "A modifier cannot also be a button",
+            swap.replace(""","holdMs":400""", "") to "The timer must be between",
             swap.replace(""""style":"HOLD"""", """"style":"PRESS"""")
-                to "PRESS has no hold duration",
+                to "A tap has no timer",
             swap.replace(""""modifiers":["AYN"]""", """"modifiers":[]""")
-                to "a trigger starts with a modifier",
+                to "A trigger must start with a modifier",
             swap.replace(oneButton, """[{"device":"PAD","type":"ABS","code":16,"value":0}]""")
                 to "non-zero threshold",
         )
@@ -248,7 +248,7 @@ class ConfigCodecTest {
         val d = r.dropped.single()
         assertEquals(1, d.index)
         assertEquals("home-tap", d.id)
-        assertTrue("tap HOME alone" in d.reason && "go home" in d.reason, d.reason)
+        assertEquals("Home alone cannot be a shortcut: it would no longer go home", d.reason)
     }
 
     @Test
@@ -265,7 +265,7 @@ class ConfigCodecTest {
     fun `an Apps scope with no packages is dropped`() = assertDrops(
         listOf(
             swap.dropLast(1) + ""","scope":{"kind":"Apps","included":[]}}"""
-                to "at least one package",
+                to "Choose at least one app",
         )
     )
 
@@ -313,7 +313,7 @@ class ConfigCodecTest {
     fun `an entry without a usable id is dropped with a null id`() {
         val blank = dropped(swap.replace(""""id":"swap"""", """"id":"  """"))
         assertNull(blank.id)
-        assertTrue("needs an id" in blank.reason, blank.reason)
+        assertEquals("A shortcut must have a name", blank.reason)
         val missing = dropped(swap.replace(""""id":"swap",""", ""))
         assertNull(missing.id)
         assertTrue("id is missing" in missing.reason, missing.reason)

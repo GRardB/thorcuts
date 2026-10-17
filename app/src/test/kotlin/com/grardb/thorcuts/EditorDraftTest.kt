@@ -84,10 +84,10 @@ class EditorDraftTest {
         val noMod = assertFailsWith<IllegalArgumentException> {
             base().copy(modifiers = emptySet()).toShortcut()
         }
-        assertTrue("starts with a modifier" in noMod.message!!, noMod.message)
+        assertEquals("A trigger must start with a modifier", noMod.message)
         val bareHome = base().copy(modifiers = setOf(ModifierKey.HOME), buttons = emptySet())
         val home = assertFailsWith<IllegalArgumentException> { bareHome.toShortcut() }
-        assertTrue("HOME" in home.message!! && "go home" in home.message!!, home.message)
+        assertEquals("Home alone cannot be a shortcut: it would no longer go home", home.message)
     }
 
     @Test

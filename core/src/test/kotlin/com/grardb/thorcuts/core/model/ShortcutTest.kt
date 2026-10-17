@@ -76,6 +76,44 @@ class ShortcutTest {
         assertTrue(s.enabled)
     }
 
+    @Test
+    fun `every refusal reads as a sentence the editor can show under Save`() {
+        fun reason(block: () -> Unit): String? =
+            assertFailsWith<IllegalArgumentException>(block = block).message
+        val ayn = setOf(ModifierKey.AYN)
+        assertEquals("A trigger must start with a modifier", reason { Trigger(emptySet()) })
+        assertEquals(
+            "A trigger can have at most 4 buttons (got 5)",
+            reason { Trigger(ayn, setOf(key(304), key(305), key(307), key(308), key(310))) },
+        )
+        assertEquals(
+            "A modifier cannot also be a button",
+            reason { Trigger(ayn, setOf(ModifierKey.HOME.control)) },
+        )
+        assertEquals(
+            "A tap has no timer",
+            reason { Trigger(ayn, style = TriggerStyle.PRESS, holdMs = 400) },
+        )
+        assertEquals(
+            "The timer must be between 1 and 65535 ms (got 0)",
+            reason { Trigger(ayn, style = TriggerStyle.HOLD, holdMs = 0) },
+        )
+        assertEquals("Choose at least one app", reason { Scope.Apps(emptySet()) })
+        val t = Trigger(ayn, setOf(key(304)))
+        assertEquals(
+            "A shortcut must have a name",
+            reason { Shortcut(" ", t, Action.SwapScreens) },
+        )
+        assertEquals(
+            "Home alone cannot be a shortcut: it would no longer go home",
+            reason { Shortcut("h", Trigger(setOf(ModifierKey.HOME)), Action.SwapScreens) },
+        )
+        assertEquals(
+            "Back alone cannot be a shortcut: it would no longer go back",
+            reason { Shortcut("b", Trigger(setOf(ModifierKey.BACK)), Action.SwapScreens) },
+        )
+    }
+
     /** Binds [t] to an action: Rule 1 is the shortcut's, so a trigger alone never refuses. */
     private fun bound(t: Trigger) = Shortcut("s", t, Action.GoHome(ScreenTarget.TOP))
 
@@ -83,14 +121,14 @@ class ShortcutTest {
     fun `tap Home alone cannot be a shortcut`() {
         val tap = Trigger(setOf(ModifierKey.HOME))          // the trigger itself is fine
         val e = assertFailsWith<IllegalArgumentException> { bound(tap) }
-        assertTrue("HOME" in e.message!! && "go home" in e.message!!, e.message)
+        assertEquals("Home alone cannot be a shortcut: it would no longer go home", e.message)
     }
 
     @Test
     fun `tap Back alone cannot be a shortcut`() {
         val tap = Trigger(setOf(ModifierKey.BACK))
         val e = assertFailsWith<IllegalArgumentException> { bound(tap) }
-        assertTrue("BACK" in e.message!! && "go back" in e.message!!, e.message)
+        assertEquals("Back alone cannot be a shortcut: it would no longer go back", e.message)
     }
 
     @Test

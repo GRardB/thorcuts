@@ -18,16 +18,18 @@ data class Trigger(
     val style: TriggerStyle = TriggerStyle.PRESS,
     val holdMs: Int? = null,
 ) {
+    // The messages are what the editor shows under Save (every refusal comes back as one
+    // `Rejected(reason)`), so each is a sentence that says what must change.
     init {
-        require(modifiers.isNotEmpty()) { "a trigger starts with a modifier" }
+        require(modifiers.isNotEmpty()) { "A trigger must start with a modifier" }
         require(buttons.size <= MAX_BUTTONS) {
-            "at most $MAX_BUTTONS buttons, got ${buttons.size}"
+            "A trigger can have at most $MAX_BUTTONS buttons (got ${buttons.size})"
         }
-        require(buttons.none(ModifierKey::isModifier)) { "a modifier cannot also be a button" }
+        require(buttons.none(ModifierKey::isModifier)) { "A modifier cannot also be a button" }
         when (style) {
-            TriggerStyle.PRESS -> require(holdMs == null) { "PRESS has no hold duration" }
+            TriggerStyle.PRESS -> require(holdMs == null) { "A tap has no timer" }
             TriggerStyle.HOLD -> require(holdMs != null && holdMs in MIN_HOLD_MS..MAX_HOLD_MS) {
-                "HOLD needs holdMs in $MIN_HOLD_MS..$MAX_HOLD_MS, got $holdMs"
+                "The timer must be between $MIN_HOLD_MS and $MAX_HOLD_MS ms (got $holdMs)"
             }
         }
     }
@@ -64,7 +66,7 @@ sealed interface Scope {
 
     /** Only in [included] — "these four emulators" is a real case. */
     data class Apps(val included: Set<String>) : Scope {
-        init { require(included.isNotEmpty()) { "an Apps scope names at least one package" } }
+        init { require(included.isNotEmpty()) { "Choose at least one app" } }
     }
 }
 
@@ -87,12 +89,13 @@ data class Shortcut(
     val enabled: Boolean = true,
 ) {
     init {
-        require(id.isNotBlank()) { "a shortcut needs an id" }
+        require(id.isNotBlank()) { "A shortcut must have a name" }
         val t = trigger
         if (t.style == TriggerStyle.PRESS && t.buttons.isEmpty() && t.modifiers.size == 1) {
             val only = t.modifiers.single()
             require(only !in NAVIGATION) {
-                "tap ${only.name} alone is not bindable: it would no longer ${NAVIGATION[only]}"
+                "${ThorControls.name(only)} alone cannot be a shortcut: " +
+                    "it would no longer ${NAVIGATION[only]}"
             }
         }
     }

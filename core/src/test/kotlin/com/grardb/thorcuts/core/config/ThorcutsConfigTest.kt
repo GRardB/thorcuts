@@ -24,7 +24,7 @@ class ThorcutsConfigTest {
         val e = assertFailsWith<IllegalArgumentException> {
             ThorcutsConfig(listOf(shortcut("a"), shortcut("b"), shortcut("a")))
         }
-        assertTrue("ids repeat" in e.message!! && "a" in e.message!!, e.message)
+        assertEquals("Shortcut names repeat: a", e.message)
     }
 
     @Test
@@ -76,7 +76,7 @@ class ThorcutsConfigTest {
     fun `added with a repeated id, or a repeated trigger where both apply, is refused`() {
         val c = ThorcutsConfig(listOf(twin("a")))
         val byId = assertFailsWith<IllegalArgumentException> { c.added(shortcut("a")) }
-        assertTrue("ids repeat" in byId.message!!, byId.message)
+        assertEquals("A shortcut named 'a' already exists", byId.message)   // by name, first
         val byTrigger = assertFailsWith<IllegalArgumentException> { c.added(twin("b")) }
         assertEquals("'b' repeats the trigger of 'a' everywhere", byTrigger.message)
         c.added(twin("b", enabled = false))                                // parked: fine
@@ -90,7 +90,7 @@ class ThorcutsConfigTest {
         assertEquals(listOf(edited, shortcut("b")), r.shortcuts)
         assertEquals(c.unknown, r.unknown)
         val e = assertFailsWith<IllegalArgumentException> { c.replaced(shortcut("zzz")) }
-        assertEquals("no shortcut 'zzz' to replace", e.message)
+        assertEquals("No shortcut 'zzz' to replace", e.message)
     }
 
     @Test

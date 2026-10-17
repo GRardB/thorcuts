@@ -21,7 +21,7 @@ data class ThorcutsConfig(
 ) {
     init {
         val repeated = shortcuts.groupingBy { it.id }.eachCount().filterValues { it > 1 }.keys
-        require(repeated.isEmpty()) { "shortcut ids repeat: $repeated" }
+        require(repeated.isEmpty()) { "Shortcut names repeat: ${repeated.joinToString(", ")}" }
         ConflictDetector.firstConflict(shortcuts)?.let {
             throw IllegalArgumentException(it.reason)
         }
@@ -34,16 +34,22 @@ data class ThorcutsConfig(
     fun withEnabled(id: String, enabled: Boolean): ThorcutsConfig =
         copy(shortcuts = shortcuts.map { if (it.id == id) it.copy(enabled = enabled) else it })
 
-    /** The same list with [shortcut] appended. A repeated id, or a repeated trigger where
-     *  both apply, is refused by `init` — the store reports it as a rejected write. */
-    fun added(shortcut: Shortcut): ThorcutsConfig = copy(shortcuts = shortcuts + shortcut)
+    /** The same list with [shortcut] appended. A name already in the list is refused here,
+     *  naming it (`init` would say "names repeat"); a repeated trigger where both apply is
+     *  refused by `init` — the store reports either as a rejected write. */
+    fun added(shortcut: Shortcut): ThorcutsConfig {
+        require(shortcuts.none { it.id == shortcut.id }) {
+            "A shortcut named '${shortcut.id}' already exists"
+        }
+        return copy(shortcuts = shortcuts + shortcut)
+    }
 
     /** The same list with the shortcut of [shortcut]'s id replaced in place. An absent id is
      *  refused: the editor replaces what it opened, and silently appending would hide a
      *  shortcut that went away under it. */
     fun replaced(shortcut: Shortcut): ThorcutsConfig {
         require(shortcuts.any { it.id == shortcut.id }) {
-            "no shortcut '${shortcut.id}' to replace"
+            "No shortcut '${shortcut.id}' to replace"
         }
         return copy(shortcuts = shortcuts.map { if (it.id == shortcut.id) shortcut else it })
     }
