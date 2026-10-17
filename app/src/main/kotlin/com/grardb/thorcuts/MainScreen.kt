@@ -34,6 +34,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.ThorControls
 
+/** What the Save-As dialog proposes; the user can rename it there. */
+private const val EXPORT_NAME = "thorcuts-config.json"
+
+/** The type Save-As stamps on the new file. */
+private const val EXPORT_MIME = "application/json"
+
+/** The open filter: every file, so a JSON file saved under the wrong type by a chat app is
+ *  still pickable — a wrong pick is explained by the config line, a greyed-out right file by
+ *  nothing. */
+private const val ANY_FILE = "*/*"
+
 /**
  * The app: the main screen, or the editor while a draft is open. Dark and flat throughout —
  * a true-black background from the theme in [MainActivity], Material 3's dark defaults for
@@ -54,12 +65,12 @@ fun ThorcutsScreen(vm: ThorcutsViewModel) {
 }
 
 /**
- * The switch, the four status lines, the notes, the shortcut list, Add — ONE scrolling list,
- * so nothing is ever pushed off the Thor's shorter bottom panel: the header is as tall as its
- * status lines and notes happen to be (a rejected write's reason wraps; a larger system font
- * grows everything), and the rows and the Add button scroll with it. (Task 5's review: a
- * fixed header above a weighted list left Add, the only way into the editor, with nothing to
- * scroll once the header outgrew the panel.)
+ * The switch, the four status lines, the notes, the shortcut list, Add, Export and Import —
+ * ONE scrolling list, so nothing is ever pushed off the Thor's shorter bottom panel: the
+ * header is as tall as its status lines and notes happen to be (a rejected write's reason
+ * wraps; a larger system font grows everything), and the rows and the buttons scroll with
+ * it. (Task 5's review: a fixed header above a weighted list left Add, the only way into the
+ * editor, with nothing to scroll once the header outgrew the panel.)
  */
 @Composable
 private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyListState) {
@@ -88,6 +99,17 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
+    // Export and import go through the system's file picker (the Storage Access Framework):
+    // CreateDocument is a browser's "Save as" dialog, OpenDocument its <input type="file">.
+    // Each returns a content Uri the ViewModel writes or reads once, off main; no permission,
+    // no provider of our own. A cancelled picker returns null. Remembered here, on the screen,
+    // like askNotifications.
+    val exportTo = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(EXPORT_MIME),
+    ) { uri -> if (uri != null) vm.exportFile(uri) }
+    val importFrom = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) vm.importFile(uri) }
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -110,6 +132,21 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
         item {
             OutlinedButton(onClick = vm::add, modifier = Modifier.fillMaxWidth()) {
                 Text("Add a shortcut")
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { exportTo.launch(EXPORT_NAME) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Export…") }
+                OutlinedButton(
+                    onClick = { importFrom.launch(arrayOf(ANY_FILE)) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("Import…") }
             }
         }
     }

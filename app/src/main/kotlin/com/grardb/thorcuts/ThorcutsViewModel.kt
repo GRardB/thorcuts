@@ -2,6 +2,7 @@ package com.grardb.thorcuts
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +14,7 @@ import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.ConflictDetector
 import com.grardb.thorcuts.platform.coordinator.CoordinatorState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +24,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
 
 /** A recording left open — the game on the other screen, a dead pad — ends itself. */
 private const val RECORDING_TIMEOUT_MS = 20_000L
@@ -69,12 +73,16 @@ data class InstalledApp(val packageName: String, val label: String)
  * Recording is the coordinator's too; this ViewModel only starts it, copies the result into
  * the draft when the combo is released, and ends it — on the release, on close, and after
  * [RECORDING_TIMEOUT_MS] — so the helper's gate never stays shut behind a screen that is gone.
+ * Import and export are the coordinator's too ([exportFile], [importFile]): this ViewModel only
+ * opens the file the picker returned and does that I/O off main.
  */
 class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val coordinator = ThorcutsApp.of(app).coordinator
 
     private val pm = app.packageManager
+
+    private val resolver = app.contentResolver
 
     /** Process-lifetime and on main: a write outlives this ViewModel. See [ThorcutsApp.writes]. */
     private val writes = ThorcutsApp.of(app).writes
@@ -292,6 +300,40 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Export to the file the Save-As picker returned: the write on IO, the outcome on the
+     * config line (the coordinator's). `wt`, so an existing file picked for overwriting is
+     * truncated — on some providers `w` alone leaves the tail of a longer old text.
+     */
+    fun exportFile(uri: Uri) {
+        writes.launch {
+            withContext(Dispatchers.IO) {
+                coordinator.exportTo { text ->
+                    val out = resolver.openOutputStream(uri, "wt")
+                        ?: throw IOException("could not open the file")
+                    out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Import the file the picker returned, as a merge that never replaces (parent §10): the
+     * read on IO and bounded ([ImportReader] — a mis-pick cannot load gigabytes), the merge
+     * and its report the coordinator's.
+     */
+    fun importFile(uri: Uri) {
+        writes.launch {
+            withContext(Dispatchers.IO) {
+                coordinator.importFrom {
+                    val input = resolver.openInputStream(uri)
+                        ?: throw IOException("could not open the file")
+                    input.use { ImportReader.read(it, MAX_IMPORT_BYTES) }
+                }
+            }
+        }
+    }
+
     fun cancel() {
         draftSession++
         stopRecording()
@@ -317,5 +359,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         /** Kept from the diagnostics ViewModel: the device runs filter on this tag. */
         const val TAG = "ThorcutsDiag"
         val GAMEPLAY = setOf(ModifierKey.START, ModifierKey.SELECT)
+        /** The import's cap: a 64-rule config is tens of KB; a megabyte is a mis-pick. */
+        const val MAX_IMPORT_BYTES = 1 shl 20
     }
 }
