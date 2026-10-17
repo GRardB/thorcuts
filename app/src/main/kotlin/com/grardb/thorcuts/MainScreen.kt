@@ -88,10 +88,6 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
-    // The keep-alive notification's channel page, where the user can hide it.
-    val onNotification: () -> Unit = {
-        context.startActivity(KeepAliveChannel.settings(context))
-    }
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -103,7 +99,7 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        item { Header(state, onSwitch, onMonitor, onNotification) }
+        item { Header(state, onSwitch, onMonitor) }
         items(state.shortcuts, key = { it.id }) { s ->
             ShortcutRow(
                 shortcut = s,
@@ -121,12 +117,7 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
 
 /** Everything above the rows: the title, the switch, the four status lines, the notes. */
 @Composable
-private fun Header(
-    state: UiState,
-    onSwitch: () -> Unit,
-    onMonitor: () -> Unit,
-    onNotification: () -> Unit,
-) {
+private fun Header(state: UiState, onSwitch: () -> Unit, onMonitor: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Thorcuts", style = MaterialTheme.typography.titleMedium)
 
@@ -160,11 +151,6 @@ private fun Header(
                 modifier = Modifier.clickable(onClick = onMonitor),
             )
         }
-        Text(
-            Copy.NOTIFICATION,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.clickable(onClick = onNotification),
-        )
         for (note in Copy.NOTES) Text(note, style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()

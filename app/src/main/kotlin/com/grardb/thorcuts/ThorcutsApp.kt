@@ -37,8 +37,9 @@ class ThorcutsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // The keep-alive notification's channel, so its settings page exists before the
-        // switch is ever turned on (two binder calls, idempotent).
+        // The keep-alive notification's channel, so it is listed under Settings → Apps →
+        // Thorcuts → Notifications before the switch is ever turned on (two binder calls,
+        // idempotent).
         KeepAliveChannel.create(this)
         val gateway = PserviceGateway(this)
         coordinator = ThorcutsCoordinator(
