@@ -4,13 +4,14 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.ScreenTarget
-import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.ConflictDetector
 import com.grardb.thorcuts.platform.coordinator.CoordinatorState
@@ -26,41 +27,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import kotlin.math.roundToInt
 
 /** A recording left open — the game on the other screen, a dead pad — ends itself. */
 private const val RECORDING_TIMEOUT_MS = 20_000L
 
-data class UiState(
-    /** The persisted switch, and the transition text while a start or stop is in flight. */
-    val enabled: Boolean,
-    val transition: String?,
-    /** The helper is up and ready: Record is offered exactly then. */
-    val helperLive: Boolean,
-    val helperState: String,
-    val tableState: String,
-    val configState: String,
-    val shortcuts: List<Shortcut>,
-    /** Non-null while the editor is open. */
-    val editor: EditorDraft?,
-    /** Non-null while the recorder is listening. */
-    val recording: TriggerRecorder?,
-    /** The one line about Start or Select among the draft's modifiers, when they are. */
-    val modifierNote: String?,
-    /** ConflictDetector's warning on the draft's trigger, as copy; null when there is none, or
-     *  the draft is not yet a trigger. */
-    val warning: String?,
-    /** The accessibility service is connected: the app in front is being reported. */
-    val monitor: Boolean,
-    /** The package in front, or null: no monitor, nothing focused, or not yet known. */
-    val foreground: String?,
-    /** The installed apps the picker lists; empty until the picker is first opened. */
-    val apps: List<InstalledApp>,
-    /** A Save or Delete is in flight: the buttons are disabled on it (E7-2). */
-    val writing: Boolean,
-)
-
-/** One installed app the picker can scope to: its package, and its label for the list. */
-data class InstalledApp(val packageName: String, val label: String)
+/** The picker's icon size; each icon is rendered once at this size, in pixels, and kept. */
+private const val ICON_DP = 40
 
 /**
  * A view of the holder, plus the one piece of state that is the screen's own: the editor's
@@ -75,7 +48,8 @@ data class InstalledApp(val packageName: String, val label: String)
  * the draft when the combo is released, and ends it — on the release, on close, and after
  * [RECORDING_TIMEOUT_MS] — so the helper's gate never stays shut behind a screen that is gone.
  * Import and export are the coordinator's too ([exportFile], [importFile]): this ViewModel only
- * opens the file the picker returned and does that I/O off main.
+ * opens the file the picker returned and does that I/O off main. What those report, and a
+ * refused row toggle, is posted as a [Message] for the shell's snackbar (the UI polish).
  */
 class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -85,16 +59,22 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val resolver = app.contentResolver
 
+    /** Pixels per dp on this device, for the picker's icons. */
+    private val density = app.resources.displayMetrics.density
+
     /** Process-lifetime and on main: a write outlives this ViewModel. See [ThorcutsApp.writes]. */
     private val writes = ThorcutsApp.of(app).writes
 
     private val draft = MutableStateFlow<EditorDraft?>(null)
 
-    /** The ViewModel's own state beyond the draft: the picker's app list (resolved once) and
-     *  the in-flight-write flag, so the `combine` stays at five flows. */
+    /** The ViewModel's own state beyond the draft: the picker's app list (resolved once, with
+     *  a flag while it is), the in-flight-write flag and the last message, so the `combine`
+     *  stays at five flows. */
     private data class Local(
         val installed: List<InstalledApp> = emptyList(),
+        val loadingApps: Boolean = false,
         val writing: Boolean = false,
+        val message: Message? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -115,6 +95,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     ) = UiState(
         enabled = c.enabled,
         transition = c.transition,
+        failure = c.failure,
         helperLive = c.helperLive,
         helperState = c.helperState,
         tableState = c.tableState,
@@ -134,8 +115,11 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
             },
         monitor = c.monitor,
         foreground = c.foreground,
+        needsMonitor = needsMonitor(config.shortcuts, c.monitor),
         apps = l.installed,
+        loadingApps = l.loadingApps,
         writing = l.writing,
+        message = l.message,
     )
 
     val state: StateFlow<UiState> =
@@ -187,13 +171,20 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
      *  the button is disabled on the transition. */
     fun setEnabled(on: Boolean) = coordinator.setEnabled(on)
 
-    /** The row switch. A Rejected (enabling a parked duplicate) shows in the config line, as
-     *  every rejected write does. */
+    /** The row switch. A Rejected (enabling a parked duplicate) is posted as a snackbar; the
+     *  row's switch itself snaps back, since it only ever shows the config. */
     fun setShortcutEnabled(id: String, on: Boolean) {
         writes.launch {
             val outcome = coordinator.update { it.withEnabled(id, on) }
             Log.i(TAG, "EDIT ${if (on) "enabled" else "disabled"} $id -> ${outcome.text()}")
+            if (outcome is UpdateOutcome.Rejected) post("rejected: ${outcome.reason}")
         }
+    }
+
+    /** Queue [text] for the shell's snackbar, its first letter capitalised. */
+    private fun post(text: String) {
+        val shown = text.replaceFirstChar(Char::uppercase)
+        local.update { it.copy(message = Message((it.message?.seq ?: 0) + 1, shown)) }
     }
 
     fun add() {
@@ -214,23 +205,39 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(apps = apps)
     }
 
-    /** Open the picker, resolving the installed-app list once (on main; tens of ms, and only
-     *  when the user asks for it). */
+    /**
+     * Open the picker at once, and resolve the installed-app list the first time — off main,
+     * since each app's icon is rendered to a bitmap on the way (tens of apps, a few hundred
+     * ms); the picker shows a spinner until the list lands. Resolved once per ViewModel.
+     */
     fun openPicker() {
-        if (local.value.installed.isEmpty()) {
-            local.update { it.copy(installed = resolveInstalled()) }
-        }
         change { it.copy(picker = true) }
+        if (local.value.installed.isNotEmpty() || local.value.loadingApps) return
+        local.update { it.copy(loadingApps = true) }
+        viewModelScope.launch {
+            try {
+                val apps = withContext(Dispatchers.IO) { resolveInstalled() }
+                local.update { it.copy(installed = apps) }
+            } finally {
+                local.update { it.copy(loadingApps = false) }
+            }
+        }
     }
 
     fun closePicker() = change { it.copy(picker = false) }
 
+    /** Every launcher app, one per package, by label; its icon at [ICON_DP] or null when the
+     *  icon cannot be loaded (a broken package's resources — the row shows a blank circle). */
     private fun resolveInstalled(): List<InstalledApp> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val px = (ICON_DP * density).roundToInt()
         @Suppress("DEPRECATION")
         return pm.queryIntentActivities(intent, 0)
-            .associate { it.activityInfo.packageName to it.loadLabel(pm).toString() }
-            .map { (packageName, label) -> InstalledApp(packageName, label) }
+            .associateBy { it.activityInfo.packageName }
+            .map { (packageName, info) ->
+                val icon = runCatching { info.loadIcon(pm).toBitmap(px, px).asImageBitmap() }
+                InstalledApp(packageName, info.loadLabel(pm).toString(), icon.getOrNull())
+            }
             .sortedBy { it.label.lowercase() }
     }
 
@@ -308,13 +315,14 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun exportFile(uri: Uri) {
         writes.launch {
-            withContext(Dispatchers.IO) {
+            val outcome = withContext(Dispatchers.IO) {
                 coordinator.exportTo { text ->
                     val out = resolver.openOutputStream(uri, "wt")
                         ?: throw IOException("could not open the file")
                     out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
                 }
             }
+            post(outcome)
         }
     }
 
@@ -325,13 +333,14 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun importFile(uri: Uri) {
         writes.launch {
-            withContext(Dispatchers.IO) {
+            val outcome = withContext(Dispatchers.IO) {
                 coordinator.importFrom {
                     val input = resolver.openInputStream(uri)
                         ?: throw IOException("could not open the file")
                     input.use { ImportReader.read(it, MAX_IMPORT_BYTES) }
                 }
             }
+            post(outcome)
         }
     }
 
