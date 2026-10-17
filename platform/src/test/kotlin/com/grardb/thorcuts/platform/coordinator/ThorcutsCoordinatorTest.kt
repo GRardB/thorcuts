@@ -732,6 +732,18 @@ class ThorcutsCoordinatorTest {
     }
 
     @Test
+    fun `an import with nothing skipped or dropped reports plain counts`() {
+        val c = coordinator()
+        val only = swap.copy(id = "b-only", trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
+        runBlocking { c.importFrom { ConfigCodec.encode(ThorcutsConfig(listOf(only))) } }
+        assertEquals(
+            "config: 2 shortcut(s), imported: 1 added, 0 skipped, 0 dropped",
+            c.state.value.configState,
+        )
+        assertEquals(listOf("swap-screens", "b-only"), c.config.value.shortcuts.map { it.id })
+    }
+
+    @Test
     fun `an import that fails to decode writes nothing and says why`() {
         val c = coordinator()
         val before = file.text

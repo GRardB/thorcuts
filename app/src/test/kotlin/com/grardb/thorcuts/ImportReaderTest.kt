@@ -46,4 +46,12 @@ class ImportReaderTest {
         assertEquals("12345678", ImportReader.read(trickle("12345678"), 8))
         assertFailsWith<IOException> { ImportReader.read(trickle("123456789"), 8) }
     }
+
+    @Test
+    fun `a leading byte-order mark is dropped, and only a leading one`() {
+        assertEquals("{}", ImportReader.read(stream("\uFEFF{}"), 8))
+        assertEquals("a\uFEFFb", ImportReader.read(stream("a\uFEFFb"), 8))
+        // The three BOM bytes count against the limit before they are dropped.
+        assertFailsWith<IOException> { ImportReader.read(stream("\uFEFF123456"), 8) }
+    }
 }

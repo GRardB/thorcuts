@@ -95,9 +95,10 @@ data class CoordinatorState(
  * [exportTo] and [importFrom]. Nothing here imports `android.*`: every Android touchpoint
  * arrives through a constructor argument, so the whole bookkeeping runs on the host.
  *
- * Threading, unchanged from the ViewModel this replaces: the helper's messages arrive on
- * the supervisor's reader thread and the store's events on the store's thread, both
- * updating the thread-safe [state]; a fire hops to [privileged] — Privilege.scope, the one
+ * Threading: the helper's messages arrive on the supervisor's reader thread, the store's
+ * events on the store's thread, and an export or import's outcome on its caller's thread
+ * (the ViewModel's IO, M5) — all updating the thread-safe [state]; a fire hops to
+ * [privileged] — Privilege.scope, the one
  * privileged thread, process-lifetime — and so do the blocking start and stop, which
  * therefore serialise against every fire and every UI-driven call. Every decision about
  * the switch, a start or a stop is made inside the state's CAS under one monitor

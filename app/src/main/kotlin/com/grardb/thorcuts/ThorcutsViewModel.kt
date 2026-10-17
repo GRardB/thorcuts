@@ -68,8 +68,9 @@ data class InstalledApp(val packageName: String, val label: String)
  * by [ThorcutsApp]); every edit goes through `coordinator.update`, and the Shortcut is built
  * INSIDE the edit lambda so every model `require` comes back as one `Rejected(reason)`. The
  * writes run on [ThorcutsApp.writes], not this ViewModel's scope, so a Save survives the
- * screen closing; one write at a time, so a second Save tap cannot run the add again against
- * the config the first one wrote and report a refusal for a write that succeeded.
+ * screen closing; the editor's writes go one at a time (the `writing` flag — an import or
+ * export does not take it), so a second Save tap cannot run the add again against the
+ * config the first one wrote and report a refusal for a write that succeeded.
  * Recording is the coordinator's too; this ViewModel only starts it, copies the result into
  * the draft when the combo is released, and ends it — on the release, on close, and after
  * [RECORDING_TIMEOUT_MS] — so the helper's gate never stays shut behind a screen that is gone.
