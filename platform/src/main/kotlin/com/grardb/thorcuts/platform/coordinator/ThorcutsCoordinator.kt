@@ -329,8 +329,9 @@ class ThorcutsCoordinator(
         return outcome
     }
 
-    /** Put [outcome] on the config line and return it: what the screen shows as a snackbar
-     *  (the UI polish), without the line's `config: ` prefix. */
+    /** Put [outcome] on the config line and return it, without the line's `config: ` prefix:
+     *  what the screen shows as a snackbar (the UI polish) — except an import that merged,
+     *  whose report is the dialog's and which calls this for the line alone. */
     private fun configLine(outcome: String): String {
         _state.update { it.copy(configState = "config: $outcome") }
         return outcome
@@ -389,7 +390,7 @@ class ThorcutsCoordinator(
             "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
                 "dropped=${r.dropped.size}"
         )
-        configLine(importLine(r))
+        configLine(importLine(r))   // the line only: the screen's report is the dialog's
         return ImportOutcome.Merged(r)
     }
 

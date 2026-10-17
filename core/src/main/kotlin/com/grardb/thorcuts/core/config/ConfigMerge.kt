@@ -20,7 +20,7 @@ data class MergeResult(
  * Import as a merge that never replaces (parent spec §10). Identity is the `id`, not the
  * trigger — but a config may not hold two enabled shortcuts with one trigger where both
  * apply ([ThorcutsConfig], Rule 2), so an imported shortcut that would repeat an accepted
- * one's trigger is skipped exactly as an id already present is: the merge decides nothing
+ * one's trigger is skipped exactly as a name already present is: the merge decides nothing
  * silently, and the report names it.
  */
 object ConfigMerge {
@@ -28,7 +28,7 @@ object ConfigMerge {
     /**
      * [current] plus every imported shortcut whose id is new and whose trigger repeats none
      * of the accepted ones ([current], then the ones added before it), in import order. An
-     * id already present, or a trigger that would conflict, is skipped with that reason.
+     * name already present, or a trigger that would conflict, is skipped with that reason.
      * [current]'s unknown top-level members are kept and the imported file's are not merged;
      * an added shortcut brings its own unknown members, a skipped one leaves the current
      * one's in place. [imported]'s drops are passed through for the report.

@@ -70,5 +70,16 @@ class UiStateTest {
             Report("Imported: 1 added, 0 skipped, 0 dropped", "Nothing was skipped or dropped."),
             importReport(none),
         )
+        val dropsOnly = MergeResult(
+            config, added = emptyList(), skipped = emptyList(),
+            dropped = listOf(Dropped(0, "bad", "unknown action kind 'Teleport'")),
+        )
+        assertEquals(
+            Report(
+                "Imported: 0 added, 0 skipped, 1 dropped",
+                "Dropped #0 'bad': unknown action kind 'Teleport'",
+            ),
+            importReport(dropsOnly),
+        )
     }
 }

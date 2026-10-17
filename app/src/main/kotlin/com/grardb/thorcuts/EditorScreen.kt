@@ -265,10 +265,12 @@ private fun ChoiceRow(
     onSelect: () -> Unit,
 ) {
     Row(
+        // The indent comes BEFORE the clickable, so a nested row's tap target and ripple start
+        // at the indent too (the final review).
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
-            .padding(start = if (nested) NESTED else 0.dp),
+            .padding(start = if (nested) NESTED else 0.dp)
+            .clickable(onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onSelect)

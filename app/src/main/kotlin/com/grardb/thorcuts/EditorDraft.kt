@@ -151,9 +151,9 @@ data class EditorDraft(
         enabled = original?.enabled ?: true,
     )
 
-    /** The scope the draft describes, or a throw with the draft's own message when an app
-     *  list is empty (the model's "an Apps scope names at least one package" names a type;
-     *  this names what to do). */
+    /** The scope the draft describes, or a throw when an app list is empty. The model refuses
+     *  an empty `Apps` scope with the same words; this check also covers EXCEPT, which builds
+     *  a `Global` the model has no rule for. */
     private fun toScope(): Scope = when (scope) {
         ScopeKind.EVERYWHERE -> Scope.Global()
         ScopeKind.EXCEPT -> { requireApps(); Scope.Global(apps) }

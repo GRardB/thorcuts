@@ -89,7 +89,7 @@ fun ShortcutsScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyListSt
     }
 }
 
-/** "Shortcuts" and the switch. DISABLED while a start or stop is in flight (H3-7): the
+/** "Thorcuts enabled" and the switch. DISABLED while a start or stop is in flight (H3-7): the
  *  coordinator ignores a call during a transition. Under the title, the transition text while
  *  there is one, else the last start's failure in the error colour, else nothing. */
 @Composable
