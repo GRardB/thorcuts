@@ -77,7 +77,7 @@ class ConfigCodecTest {
 
     @Test
     fun `encode then decode is the identity`() {
-        for (c in listOf(KITCHEN_SINK, Defaults.CONFIG, ThorcutsConfig(emptyList()))) {
+        for (c in listOf(KITCHEN_SINK, ONE, ThorcutsConfig(emptyList()))) {
             val back = ConfigCodec.decode(ConfigCodec.encode(c))
             assertEquals(DecodeResult.Ok(c, emptyList(), null), back)
         }

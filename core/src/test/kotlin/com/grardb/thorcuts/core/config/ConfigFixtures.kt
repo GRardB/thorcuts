@@ -28,6 +28,29 @@ internal const val RETROARCH = "com.retroarch.aarch64"
 
 internal fun padKey(code: Int) = Control(Device.PAD, EvdevType.KEY, code, 1)
 
+/** BTN_NORTH — the X button on the Thor's pad (M1 findings, control table). */
+internal val X = padKey(307)
+
+/**
+ * M1's rule — HOLD 400 · AYN + X → swap the screens — the shipped default until M5 emptied
+ * it. Test material now: the actions run, the merge, store and config tests derive their
+ * shortcuts from it, and `RuleCompilerTest` pins `m1-swap.bin` with it.
+ */
+internal val SWAP_SCREENS = Shortcut(
+    id = "swap-screens",
+    trigger = Trigger(
+        modifiers = setOf(ModifierKey.AYN),
+        buttons = setOf(X),
+        style = TriggerStyle.HOLD,
+        holdMs = 400,
+    ),
+    action = Action.SwapScreens,
+)
+
+/** A one-shortcut default for the store tests: the store's `default` is a constructor
+ *  parameter, and the tests exercise a default with content. */
+internal val ONE = ThorcutsConfig(listOf(SWAP_SCREENS))
+
 /** A PRESS shortcut on AYN + one button, enabled, global: the actions run's shape. */
 private fun press(id: String, button: Control, action: Action) =
     Shortcut(id, Trigger(setOf(ModifierKey.AYN), setOf(button)), action)
@@ -40,7 +63,7 @@ private fun press(id: String, button: Control, action: Action) =
  */
 internal val ACTIONS_RUN = ThorcutsConfig(
     shortcuts = listOf(
-        Defaults.SWAP_SCREENS,
+        SWAP_SCREENS,
         press("close-focused", padKey(304), Action.CloseScreen(ScreenTarget.FOCUSED)),
         press("close-top", padKey(310), Action.CloseScreen(ScreenTarget.TOP)),
         press("close-bottom", padKey(311), Action.CloseScreen(ScreenTarget.BOTTOM)),

@@ -1,31 +1,4 @@
 {
   "schemaVersion": 1,
-  "shortcuts": [
-    {
-      "id": "swap-screens",
-      "enabled": true,
-      "trigger": {
-        "modifiers": [
-          "AYN"
-        ],
-        "buttons": [
-          {
-            "device": "PAD",
-            "type": "KEY",
-            "code": 307,
-            "value": 1
-          }
-        ],
-        "style": "HOLD",
-        "holdMs": 400
-      },
-      "action": {
-        "kind": "SwapScreens"
-      },
-      "scope": {
-        "kind": "Global",
-        "excluded": []
-      }
-    }
-  ]
+  "shortcuts": []
 }

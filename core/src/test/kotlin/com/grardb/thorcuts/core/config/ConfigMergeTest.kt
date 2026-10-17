@@ -8,9 +8,9 @@ class ConfigMergeTest {
 
     /** Distinct triggers per id (the button is the id's first letter): a list of these is a
      *  valid config, and two with different ids never repeat a trigger. */
-    private fun shortcut(id: String) = Defaults.SWAP_SCREENS.copy(
+    private fun shortcut(id: String) = SWAP_SCREENS.copy(
         id = id,
-        trigger = Defaults.SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
+        trigger = SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
     )
     private fun extras(vararg pairs: Pair<String, String>) =
         pairs.associate { (k, v) -> k to JsonPrimitive(v) }

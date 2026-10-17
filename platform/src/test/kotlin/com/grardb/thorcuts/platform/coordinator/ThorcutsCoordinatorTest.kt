@@ -2,7 +2,6 @@ package com.grardb.thorcuts.platform.coordinator
 
 import com.grardb.thorcuts.core.config.ConfigCodec
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
-import com.grardb.thorcuts.core.config.Defaults
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
@@ -13,6 +12,7 @@ import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
+import com.grardb.thorcuts.core.model.TriggerStyle
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.RuleCompiler
 import com.grardb.thorcuts.platform.config.MemoryConfigFile
@@ -43,7 +43,19 @@ import kotlin.test.assertTrue
  */
 class ThorcutsCoordinatorTest {
 
-    private val file = MemoryConfigFile()
+    /** BTN_NORTH — the X button on the Thor's pad. */
+    private val x = Control(Device.PAD, EvdevType.KEY, 307, 1)
+
+    /** M1's rule, HOLD 400 · AYN + X → swap the screens: the shipped default until M5 emptied
+     *  it, so the file these tests start from carries it explicitly (one global rule). The
+     *  construction test alone starts with no file and sees the empty default written. */
+    private val swap = Shortcut(
+        id = "swap-screens",
+        trigger = Trigger(setOf(ModifierKey.AYN), setOf(x), TriggerStyle.HOLD, holdMs = 400),
+        action = Action.SwapScreens,
+    )
+
+    private val file = MemoryConfigFile(ConfigCodec.encode(ThorcutsConfig(listOf(swap))))
     private val switch = FakeSwitch()
     private val held = mutableListOf<Boolean>()
     private val log = RecordingLogger()
@@ -75,15 +87,16 @@ class ThorcutsCoordinatorTest {
     @Test
     fun `construction loads the config once and reads the switch, starting nothing`() {
         switch.on = true
+        file.text = null                                        // a first run: no file yet
         val c = coordinator()
         assertEquals(1, file.writes.size)                       // the default, written once
-        assertEquals("config: 1 shortcut(s), default written", c.state.value.configState)
-        assertEquals("swap-screens", c.config.value.shortcuts.single().id)
+        assertEquals("config: 0 shortcut(s), default written", c.state.value.configState)
+        assertTrue(c.config.value.shortcuts.isEmpty())          // the EMPTY default (M5)
         assertTrue(c.state.value.enabled)
         assertFalse(c.state.value.running)
         assertTrue(channel.calls.isEmpty())
         assertTrue(held.isEmpty())
-        assertTrue(log.has("CONFIG_LOAD created=true shortcuts=1 dropped=0"))
+        assertTrue(log.has("CONFIG_LOAD created=true shortcuts=0 dropped=0"))
     }
 
     @Test
@@ -133,7 +146,7 @@ class ThorcutsCoordinatorTest {
 
         // The store outlives the helper: a write with none live persists and pushes nothing.
         assertIs<UpdateOutcome.Applied>(runBlocking { c.update(swapOff) })
-        assertEquals(2, file.writes.size)
+        assertEquals(1, file.writes.size)                       // the seeded file was read
         assertTrue(channel.pushed.isEmpty())
     }
 
@@ -441,17 +454,17 @@ class ThorcutsCoordinatorTest {
 
     private val dolphin = "org.dolphinemu.dolphinemu"
 
-    /** A coordinator whose config is the default swap (global) plus one shortcut only in
-     *  Dolphin: the global list is one rule, Dolphin's is two. */
+    /** A coordinator whose config is the swap (global) plus one shortcut only in Dolphin:
+     *  the global list is one rule, Dolphin's is two. */
     private fun scopedCoordinator(): ThorcutsCoordinator {
-        val onlyDolphin = Defaults.SWAP_SCREENS.copy(
+        val onlyDolphin = swap.copy(
             id = "only-d",
-            trigger = Defaults.SWAP_SCREENS.trigger.copy(
+            trigger = swap.trigger.copy(
                 buttons = setOf(Control(Device.PAD, EvdevType.KEY, 304, 1)),
             ),
             scope = Scope.Apps(setOf(dolphin)),
         )
-        file.text = ConfigCodec.encode(ThorcutsConfig(listOf(Defaults.SWAP_SCREENS, onlyDolphin)))
+        file.text = ConfigCodec.encode(ThorcutsConfig(listOf(swap, onlyDolphin)))
         return coordinator()
     }
 
@@ -594,13 +607,13 @@ class ThorcutsCoordinatorTest {
         val before = c.state.value
         channel.emit(key(1, 194, 1))                            // AYN, on gpio-keys
         channel.emit(key(0, 307, 1))                            // X
-        assertEquals(setOf(ModifierKey.AYN.control, Defaults.X), c.recording.value!!.held)
+        assertEquals(setOf(ModifierKey.AYN.control, x), c.recording.value!!.held)
         channel.emit(key(0, 307, 0))
         channel.emit(key(1, 194, 0))
         val r = assertNotNull(c.recording.value)
         assertTrue(r.complete)
         assertEquals(setOf(ModifierKey.AYN), r.modifiers)
-        assertEquals(setOf(Defaults.X), r.buttons)
+        assertEquals(setOf(x), r.buttons)
         // The recording stays until the UI ends it; a raw event touches the recorder and
         // nothing else — not a row, not a line of the state.
         assertEquals(listOf("start", "capture on"), channel.calls)

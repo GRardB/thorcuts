@@ -1,6 +1,7 @@
 package com.grardb.thorcuts.core.rules
 
-import com.grardb.thorcuts.core.config.Defaults
+import com.grardb.thorcuts.core.config.SWAP_SCREENS
+import com.grardb.thorcuts.core.config.X
 import com.grardb.thorcuts.core.model.Action
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
@@ -78,7 +79,7 @@ class RuleCompilerTest {
         Shortcut(
             id = "m1-swap-screens",
             trigger = Trigger(
-                setOf(ModifierKey.AYN), setOf(Defaults.X), TriggerStyle.HOLD, holdMs = 400,
+                setOf(ModifierKey.AYN), setOf(X), TriggerStyle.HOLD, holdMs = 400,
             ),
             action = Action.SwapScreens,
         ),
@@ -107,11 +108,11 @@ class RuleCompilerTest {
     }
 
     @Test
-    fun `the default config compiles to the m1-swap fixture at generation 1`() {
-        // Ids are not encoded, so the one-rule default and M1's bootstrap share the bytes.
-        val table = RuleCompiler.compile(Defaults.CONFIG.shortcuts, null, generation = 1)
+    fun `the swap shortcut compiles to the m1-swap fixture at generation 1`() {
+        // Ids are not encoded, so the one-rule list and M1's bootstrap share the bytes.
+        val table = RuleCompiler.compile(listOf(SWAP_SCREENS), null, generation = 1)
         assertContentEquals(fixture("m1-swap.bin"), table.bytes)
-        assertEquals(listOf(Defaults.SWAP_SCREENS), table.shortcuts)
+        assertEquals(listOf(SWAP_SCREENS), table.shortcuts)
     }
 
     @Test

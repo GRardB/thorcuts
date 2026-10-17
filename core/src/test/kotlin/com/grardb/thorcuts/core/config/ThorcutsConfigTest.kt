@@ -1,12 +1,5 @@
 package com.grardb.thorcuts.core.config
 
-import com.grardb.thorcuts.core.model.Action
-import com.grardb.thorcuts.core.model.Control
-import com.grardb.thorcuts.core.model.Device
-import com.grardb.thorcuts.core.model.EvdevType
-import com.grardb.thorcuts.core.model.ModifierKey
-import com.grardb.thorcuts.core.model.Scope
-import com.grardb.thorcuts.core.model.TriggerStyle
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -17,14 +10,14 @@ import kotlin.test.assertTrue
 class ThorcutsConfigTest {
 
     /** Distinct triggers per id (the button is the id's first letter), so a list of these
-     *  is a valid config; [twin] is the same trigger as the default, for Rule 2's tests. */
-    private fun shortcut(id: String, enabled: Boolean = true) = Defaults.SWAP_SCREENS.copy(
+     *  is a valid config; [twin] is the same trigger as [SWAP_SCREENS], for Rule 2's tests. */
+    private fun shortcut(id: String, enabled: Boolean = true) = SWAP_SCREENS.copy(
         id = id,
-        trigger = Defaults.SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
+        trigger = SWAP_SCREENS.trigger.copy(buttons = setOf(padKey(id.first().code))),
         enabled = enabled,
     )
     private fun twin(id: String, enabled: Boolean = true) =
-        Defaults.SWAP_SCREENS.copy(id = id, enabled = enabled)
+        SWAP_SCREENS.copy(id = id, enabled = enabled)
 
     @Test
     fun `repeated ids are refused, naming the repeat`() {
@@ -119,17 +112,8 @@ class ThorcutsConfigTest {
     }
 
     @Test
-    fun `the default is one enabled global HOLD on AYN + X that swaps the screens`() {
-        val only = Defaults.CONFIG.shortcuts.single()
-        assertEquals("swap-screens", only.id)
-        assertTrue(only.enabled)
-        assertEquals(Scope.Global(), only.scope)
-        assertEquals(Action.SwapScreens, only.action)
-        assertEquals(setOf(ModifierKey.AYN), only.trigger.modifiers)
-        assertEquals(setOf(Defaults.X), only.trigger.buttons)
-        assertEquals(Control(Device.PAD, EvdevType.KEY, 307, 1), Defaults.X)   // BTN_NORTH
-        assertEquals(TriggerStyle.HOLD, only.trigger.style)
-        assertEquals(400, only.trigger.holdMs)
+    fun `the default is empty`() {
+        assertEquals(ThorcutsConfig(emptyList()), Defaults.CONFIG)
         assertTrue(Defaults.CONFIG.unknown.isEmpty)
     }
 }
