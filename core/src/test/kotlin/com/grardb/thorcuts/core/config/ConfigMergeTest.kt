@@ -42,7 +42,7 @@ class ConfigMergeTest {
         val r = ConfigMerge.merge(current, imported)
         assertEquals(listOf("a", "b", "c"), r.config.shortcuts.map { it.id })
         assertEquals(listOf("c"), r.added)
-        assertEquals(listOf("b"), r.skipped)
+        assertEquals(listOf(Skipped("b", "id already present")), r.skipped)
         assertEquals(imported.dropped, r.dropped)
     }
 
@@ -55,7 +55,8 @@ class ConfigMergeTest {
         val r = ConfigMerge.merge(current, clash)
         assertEquals(listOf("a", "b", "c"), r.config.shortcuts.map { it.id })
         assertEquals(listOf("c"), r.added)
-        assertEquals(listOf("a2"), r.skipped)
+        val reason = "'a2' repeats the trigger of 'a' everywhere"
+        assertEquals(listOf(Skipped("a2", reason)), r.skipped)
     }
 
     @Test

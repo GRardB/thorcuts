@@ -24,6 +24,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -69,28 +70,45 @@ object ConfigCodec {
 
     // ── reading ───────────────────────────────────────────────────────────────────────
 
-    fun decode(text: String): DecodeResult {
+    fun decode(text: String): DecodeResult = decode(text, migrations)
+
+    /**
+     * [decode] with the chain and the target version injected. At [SCHEMA_VERSION] 1 the
+     * migration branch is unreachable — a version equal to the current skips it, one above
+     * or below 1 is Failed — so its wiring (Failed when the chain throws, migratedFrom when
+     * it runs) is tested through this overload with a target of 2. Internal, as Migrations is.
+     */
+    internal fun decode(
+        text: String, migrations: Migrations, current: Int = SCHEMA_VERSION,
+    ): DecodeResult {
+        // The parser's own reason for an empty input ("unexpected end of the input at path:
+        // $") tells a user nothing they can act on, and a 0-byte pick is common enough to name.
+        if (text.isBlank()) return DecodeResult.Failed("not JSON: the file is empty")
         val root = try {
             Json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            return DecodeResult.Failed("not JSON: ${e.message?.lineSequence()?.first()}")
+            val detail = e.message?.lineSequence()?.first() ?: "unparseable"
+            return DecodeResult.Failed("not JSON: $detail")
         }
         val raw = root as? JsonObject
             ?: return DecodeResult.Failed("the top level is not an object")
         val version = raw[SCHEMA_VERSION_KEY]?.let { (it as? JsonPrimitive)?.plainInt() }
             ?: return DecodeResult.Failed("schemaVersion is missing or not an integer")
         if (version < 1) return DecodeResult.Failed("schemaVersion $version is below 1")
-        if (version > SCHEMA_VERSION) {
+        if (version > current) {
             return DecodeResult.Failed(
-                "schemaVersion $version is newer than this app understands ($SCHEMA_VERSION)"
+                "schemaVersion $version is newer than this app understands ($current)"
             )
         }
-        val doc = if (version == SCHEMA_VERSION) {
+        val doc = if (version == current) {
             raw
         } else {
             try {
-                migrations.migrate(raw, version)
-            } catch (e: IllegalStateException) {
+                migrations.migrate(raw, version, current)
+            } catch (e: RuntimeException) {
+                // A hole in the chain is an IllegalStateException; a step's own `require` an
+                // IllegalArgumentException. Either is this file's failure, not a throw out of
+                // a method whose contract is "never throws on input" (T2-1).
                 return DecodeResult.Failed(e.message ?: "migration failed")
             }
         }
@@ -134,7 +152,7 @@ object ConfigCodec {
         }
         val top = doc.filterKeys { it != SCHEMA_VERSION_KEY && it != SHORTCUTS_KEY }
         val config = ThorcutsConfig(shortcuts, UnknownFields(top, perShortcut))
-        val migratedFrom = version.takeIf { it != SCHEMA_VERSION }
+        val migratedFrom = version.takeIf { it != current }
         return DecodeResult.Ok(config, dropped, migratedFrom)
     }
 
@@ -147,9 +165,11 @@ object ConfigCodec {
     )
 
     private fun readTrigger(o: JsonObject): Trigger = Trigger(
-        modifiers = o.array("modifiers").map { it.asEnum<ModifierKey>("modifiers") }.toSet(),
+        modifiers = o.array("modifiers")
+            .mapIndexed { i, m -> m.asEnum<ModifierKey>("modifiers[$i]") }
+            .toSet(),
         buttons = (o["buttons"]?.asArray("buttons") ?: emptyList())
-            .map { readControl(it.asObject("buttons")) }
+            .mapIndexed { i, b -> readControl(b.asObject("buttons[$i]")) }
             .toSet(),
         style = o.enum<TriggerStyle>("style"),
         holdMs = o["holdMs"]?.asInt("holdMs"),
@@ -184,10 +204,12 @@ object ConfigCodec {
     private fun readScope(o: JsonObject): Scope = when (val kind = o.string("kind")) {
         "Global" -> Scope.Global(
             (o["excluded"]?.asArray("excluded") ?: emptyList())
-                .map { it.asString("excluded") }
+                .mapIndexed { i, p -> p.asString("excluded[$i]") }
                 .toSet()
         )
-        "Apps" -> Scope.Apps(o.array("included").map { it.asString("included") }.toSet())
+        "Apps" -> Scope.Apps(
+            o.array("included").mapIndexed { i, p -> p.asString("included[$i]") }.toSet()
+        )
         else -> fail("unknown scope kind '$kind'")
     }
 
@@ -204,7 +226,12 @@ object ConfigCodec {
                 add(shortcutJson(s, config.unknown.perShortcut[s.id].orEmpty()))
             }
         }
-        for ((key, value) in config.unknown.top) put(key, value)
+        // An unknown member named like a known one would overwrite it (T2-3): reachable only
+        // through the internal UnknownFields constructor, since decode filters, and refused
+        // here as well so that what this writes always reads back.
+        for ((key, value) in config.unknown.top) {
+            if (key != SCHEMA_VERSION_KEY && key != SHORTCUTS_KEY) put(key, value)
+        }
     }
 
     private fun shortcutJson(s: Shortcut, extra: Map<String, JsonElement>): JsonObject =
@@ -244,7 +271,7 @@ object ConfigCodec {
                     }
                 }
             }
-            for ((key, value) in extra) put(key, value)
+            for ((key, value) in extra) if (key !in SHORTCUT_KEYS) put(key, value)
         }
 
     private fun JsonObjectBuilder.screenAction(kind: String, screen: ScreenTarget) {
@@ -277,8 +304,15 @@ object ConfigCodec {
     private fun JsonElement.asString(key: String): String =
         (this as? JsonPrimitive)?.takeIf { it.isString }?.content ?: fail("$key is not a string")
 
-    private fun JsonElement.asInt(key: String): Int =
-        (this as? JsonPrimitive)?.plainInt() ?: fail("$key is not an integer")
+    /** An integral beyond the Int range says so; everything else that is not a plain
+     *  integer reads "not an integer". */
+    private fun JsonElement.asInt(key: String): Int {
+        val p = this as? JsonPrimitive
+        return p?.plainInt() ?: fail(
+            if (p != null && !p.isString && p.longOrNull != null) "$key is out of range"
+            else "$key is not an integer"
+        )
+    }
 
     private fun JsonElement.asBool(key: String): Boolean =
         (this as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull

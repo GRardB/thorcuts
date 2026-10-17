@@ -3,6 +3,9 @@ package com.grardb.thorcuts.core.config
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.Trigger
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -108,17 +111,40 @@ class ConfigCodecTest {
     }
 
     @Test
-    fun `unknown members inside trigger, action and scope are NOT preserved - a schema bump`() {
+    fun `unknown members inside trigger, action, scope and a control are NOT preserved`() {
+        // A new member inside any of the four is a schema bump by convention (config spec).
         val text = file(
             swap.replace(""""style":"HOLD"""", """"repeat":3,"style":"HOLD"""")
                 .replace(""""kind":"SwapScreens"""", """"kind":"SwapScreens","turbo":true""")
+                .replace(""""value":1}""", """"value":1,"label":"X"}""")
+                .dropLast(1) + ""","scope":{"kind":"Global","excluded":[],"strict":true}}"""
         )
         val r = ok(text)
         assertTrue(r.dropped.isEmpty())
         assertTrue(r.config.unknown.isEmpty)
         val written = ConfigCodec.encode(r.config)
-        assertFalse("repeat" in written, written)
-        assertFalse("turbo" in written, written)
+        for (member in listOf("repeat", "turbo", "label", "strict")) {
+            assertFalse(member in written, "$member in $written")
+        }
+    }
+
+    @Test
+    fun `an unknown member named like a reserved one is not written`() {
+        // Reachable only through the internal constructor (decode filters): the merge and the
+        // tests build UnknownFields directly, and a reserved name there must not overwrite the
+        // real member on the way out, or the file would not read back (T2-3).
+        val shortcut = ok(file(swap)).config.shortcuts.single()
+        val reserved = UnknownFields(
+            top = mapOf(
+                "schemaVersion" to JsonPrimitive(9),
+                "shortcuts" to JsonArray(emptyList()),
+            ),
+            perShortcut = mapOf("swap" to mapOf("id" to JsonPrimitive("other"))),
+        )
+        val written = ConfigCodec.encode(ThorcutsConfig(listOf(shortcut), reserved))
+        assertTrue("\"schemaVersion\": 1" in written, written)
+        val back = ConfigCodec.decode(written)
+        assertEquals(DecodeResult.Ok(ThorcutsConfig(listOf(shortcut)), emptyList(), null), back)
     }
 
     @Test
@@ -147,8 +173,10 @@ class ConfigCodecTest {
     @Test
     fun `a file whose frame is wrong fails as a whole`() {
         val cases = listOf(
-            "" to null,
-            "nope" to null,
+            "" to "not JSON: the file is empty",
+            " \n" to "not JSON: the file is empty",
+            "{" to "not JSON",
+            "nope" to "not an object",          // a bare word is a lenient literal: a value
             "[]" to "not an object",
             "{}" to "schemaVersion is missing",
             """{"schemaVersion":"1","shortcuts":[]}""" to "missing or not an integer",
@@ -159,8 +187,37 @@ class ConfigCodecTest {
         )
         for ((text, fragment) in cases) {
             val r = assertIs<DecodeResult.Failed>(ConfigCodec.decode(text), "for $text")
-            if (fragment != null) assertTrue(fragment in r.reason, "'$fragment' in '${r.reason}'")
+            assertTrue(fragment in r.reason, "'$fragment' in '${r.reason}'")
         }
+    }
+
+    // ── the migration wiring (T2-2): unreachable at schema version 1, so the overload ─────
+
+    /** A v1 file whose shortcuts sit under `rules`: what a step from 1 to 2 would rename. */
+    private val underRules = """{"schemaVersion": 1, "rules": [$swap]}"""
+
+    private val renameRules: (JsonObject) -> JsonObject =
+        { d -> JsonObject(d - "rules" + ("shortcuts" to d.getValue("rules"))) }
+
+    @Test
+    fun `a migration step runs for an older file and is recorded`() {
+        val chain = Migrations(mapOf(1 to renameRules))
+        val r = assertIs<DecodeResult.Ok>(ConfigCodec.decode(underRules, chain, current = 2))
+        assertEquals(listOf("swap"), r.config.shortcuts.map { it.id })
+        assertTrue(r.dropped.isEmpty())
+        assertEquals(1, r.migratedFrom)
+    }
+
+    @Test
+    fun `a chain that cannot run is a Failed with the reason`() {
+        val hole = ConfigCodec.decode(underRules, Migrations(emptyMap()), current = 2)
+        val h = assertIs<DecodeResult.Failed>(hole)
+        assertTrue("no migration from schema version 1 to 2" in h.reason, h.reason)
+        // A step's own `require` is an IllegalArgumentException: this file's failure too, not
+        // a throw out of a method whose contract is "never throws on input" (T2-1).
+        val boom: (JsonObject) -> JsonObject = { throw IllegalArgumentException("boom") }
+        val r = ConfigCodec.decode(underRules, Migrations(mapOf(1 to boom)), current = 2)
+        assertEquals(DecodeResult.Failed("boom"), r)
     }
 
     // ── per-shortcut drops ────────────────────────────────────────────────────────────
@@ -217,10 +274,16 @@ class ConfigCodecTest {
         listOf(
             swap.replace(""""code":307""", """"code":307.5""") to "code is not an integer",
             swap.replace(""""code":307""", """"code":"307"""") to "code is not an integer",
+            swap.replace(""""code":307""", """"code":3000000000""") to "code is out of range",
             swap.replace(""""device":"PAD"""", """"device":"MOUSE"""")
                 to "device: unknown name 'MOUSE'",
             swap.replace(""""modifiers":["AYN"]""", """"modifiers":["TURBO"]""")
-                to "modifiers: unknown name 'TURBO'",
+                to "modifiers[0]: unknown name 'TURBO'",
+            swap.replace(""""modifiers":["AYN"]""", """"modifiers":["AYN","TURBO"]""")
+                to "modifiers[1]: unknown name 'TURBO'",
+            swap.replace(oneButton, "[1]") to "buttons[0] is not an object",
+            swap.dropLast(1) + ""","scope":{"kind":"Global","excluded":[1]}}"""
+                to "excluded[0] is not a string",
             swap.replace(""""style":"HOLD"""", """"style":"TAP"""") to "style: unknown name 'TAP'",
             swap.replace(""""type":"KEY"""", """"type":"REL"""") to "type: unknown name 'REL'",
             swap.dropLast(1) + ""","enabled":"true"}""" to "enabled is not a boolean",
