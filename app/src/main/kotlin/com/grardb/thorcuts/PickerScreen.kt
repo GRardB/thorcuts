@@ -64,25 +64,27 @@ fun PickerScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            return@Column
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(vertical = 12.dp),
-        ) {
-            items(extras) { pkg ->
-                AppRow(pkg, pkg, icon = null, checked = pkg in draft.apps) { vm.toggleApp(pkg) }
-            }
-            items(shown, key = { it.packageName }) { app ->
-                AppRow(app.label, app.packageName, app.icon, app.packageName in draft.apps) {
-                    vm.toggleApp(app.packageName)
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(vertical = 12.dp),
+            ) {
+                items(extras) { pkg ->
+                    AppRow(pkg, pkg, icon = null, checked = pkg in draft.apps) {
+                        vm.toggleApp(pkg)
+                    }
                 }
-            }
-            item {
-                PrimaryButton(
-                    onClick = vm::closePicker,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                ) { Text("Done") }
+                items(shown, key = { it.packageName }) { app ->
+                    AppRow(app.label, app.packageName, app.icon, app.packageName in draft.apps) {
+                        vm.toggleApp(app.packageName)
+                    }
+                }
+                item {
+                    PrimaryButton(
+                        onClick = vm::closePicker,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ) { Text("Done") }
+                }
             }
         }
     }

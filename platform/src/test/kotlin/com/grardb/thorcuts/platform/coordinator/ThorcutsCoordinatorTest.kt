@@ -172,6 +172,28 @@ class ThorcutsCoordinatorTest {
     }
 
     @Test
+    fun `failure survives the user turning the switch off, until the next start`() {
+        val c = coordinator()
+        channel.outcome = HelperChannel.Start.NOT_BOUND
+        c.setEnabled(true)
+        assertEquals("could not bind the helper socket", c.state.value.failure)
+        c.setEnabled(false)                                     // a stop leaves it
+        assertFalse(c.state.value.enabled)
+        assertEquals("could not bind the helper socket", c.state.value.failure)
+    }
+
+    @Test
+    fun `the panic is not a failure`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(2))
+        assertNull(c.state.value.failure)
+        channel.emit(HelperMessage.Exiting("panic combo"))     // the user asked for the pad back
+        assertFalse(c.state.value.enabled)
+        assertNull(c.state.value.failure)                       // no red line for a choice
+    }
+
+    @Test
     fun `a start that finds the previous session still winding down is not a start`() {
         val c = coordinator()
         channel.outcome = HelperChannel.Start.ALREADY_RUNNING

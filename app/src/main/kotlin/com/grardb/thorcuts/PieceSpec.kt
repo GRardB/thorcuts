@@ -17,7 +17,8 @@ enum class Glyph { HOME, BACK, PLAY, SQUARE, UP, DOWN, LEFT, RIGHT, TIMER }
 
 /**
  * How one control is drawn: its [name] (what a screen reader hears), its shape and fill, and
- * either a [label] to print or a [glyph] to draw — never both. Pure data; `Pieces.kt` draws it.
+ * a [label] to print, a [glyph] to draw, or both (the timer piece: the glyph, then the hold).
+ * Pure data; `Pieces.kt` draws it.
  */
 data class PieceSpec(
     val name: String,

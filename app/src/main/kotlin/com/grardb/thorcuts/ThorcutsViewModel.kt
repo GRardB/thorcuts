@@ -176,10 +176,19 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Messages are numbered from 1 for the life of this ViewModel; the shell keys its
+     *  snackbar effect on the number. Written on main only (every post is under [writes]). */
+    private var posted = 0
+
     /** Queue [text] for the shell's snackbar, its first letter capitalised. */
     private fun post(text: String) {
         val shown = text.replaceFirstChar(Char::uppercase)
-        local.update { it.copy(message = Message((it.message?.seq ?: 0) + 1, shown)) }
+        local.update { it.copy(message = Message(++posted, shown)) }
+    }
+
+    /** The shell showed message [seq]: it is spent. A newer one, posted meanwhile, stays. */
+    fun consumed(seq: Int) {
+        local.update { if (it.message?.seq == seq) it.copy(message = null) else it }
     }
 
     fun add() {

@@ -19,7 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,14 +47,16 @@ fun ThorcutsScreen(vm: ThorcutsViewModel) {
     val listState = rememberLazyListState()
     var tab by rememberSaveable { mutableStateOf(Tab.SHORTCUTS) }
     val snackbar = remember { SnackbarHostState() }
-    // The last message shown, by seq: an Activity recreate (the Thor's screen swap) runs the
-    // effect again with the same message, and must not show it twice.
-    var shown by rememberSaveable { mutableIntStateOf(0) }
+    // The message is the ViewModel's until it has been shown: `consumed` clears it, so an
+    // Activity recreate (the Thor's screen swap) finds nothing to show again, and a process
+    // death starts with none — no saved watermark to collide with a fresh ViewModel's seq
+    // (the final review, twice). A show cut short by a recreate is shown again, which is
+    // right; a newer message cancels the effect, and consuming the older one is a no-op.
     val message = state.message
     LaunchedEffect(message?.seq) {
-        if (message != null && message.seq > shown) {
-            shown = message.seq
+        if (message != null) {
             snackbar.showSnackbar(message.text)
+            vm.consumed(message.seq)
         }
     }
     ThorcutsTheme {
