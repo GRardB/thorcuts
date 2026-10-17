@@ -1,7 +1,11 @@
 package com.grardb.thorcuts.platform.coordinator
 
+import com.grardb.thorcuts.core.config.ConfigCodec
 import com.grardb.thorcuts.core.config.ConfigFile
+import com.grardb.thorcuts.core.config.ConfigMerge
 import com.grardb.thorcuts.core.config.ConfigStore
+import com.grardb.thorcuts.core.config.DecodeResult
+import com.grardb.thorcuts.core.config.MergeResult
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
@@ -67,7 +71,8 @@ data class CoordinatorState(
     /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
      *  overwrite it. */
     val tableState: String = NO_TABLE,
-    /** What the config store last said: a count, the load warning, or a rejected write. */
+    /** What the config store last said — a count, the load warning, a rejected write — or
+     *  what an export or import did (M5). */
     val configState: String = "config: loading",
     /** The last action's outcome line as `<line> (<label>)`: a fired shortcut's, or the
      *  Swap button's. */
@@ -86,7 +91,8 @@ data class CoordinatorState(
  * of everything with a lifetime — the gateway, the actions, the dispatcher, the helper
  * channel, the config store, the persisted switch — built once per process by the
  * Application and never torn down. `ThorcutsViewModel` is a view of [state] and [config];
- * the editor edits through [update]. Nothing here imports `android.*`: every Android touchpoint
+ * the editor edits through [update], and a file the user picked is exported or imported through
+ * [exportTo] and [importFrom]. Nothing here imports `android.*`: every Android touchpoint
  * arrives through a constructor argument, so the whole bookkeeping runs on the host.
  *
  * Threading, unchanged from the ViewModel this replaces: the helper's messages arrive on
@@ -299,6 +305,85 @@ class ThorcutsCoordinator(
             _state.update { it.copy(configState = "config: write rejected: ${outcome.reason}") }
         }
         return outcome
+    }
+
+    /**
+     * Export: the current config, encoded, handed to [write] — the ViewModel's write into the
+     * file the user picked (parent §10: "export is the file"). The outcome goes to the config
+     * line. [write] is foreign I/O, so whatever it throws becomes that line and not a crash
+     * (the store treats the edit lambda the same way). Call off main; the ViewModel does.
+     */
+    fun exportTo(write: (String) -> Unit) {
+        val config = store.config.value
+        try {
+            write(ConfigCodec.encode(config))
+        } catch (e: Exception) {
+            val reason = e.message ?: e.toString()
+            log.w("CONFIG_EXPORT_FAILED $reason")
+            _state.update { it.copy(configState = "config: export failed: $reason") }
+            return
+        }
+        val n = config.shortcuts.size
+        log.i("CONFIG_EXPORT shortcuts=$n")
+        _state.update { it.copy(configState = "config: exported $n shortcut(s)") }
+    }
+
+    /**
+     * Import as a merge that never replaces (parent §10): [read]'s text decoded, merged into
+     * the current config inside [update] — the edit runs against the store's value, so a
+     * write between the pick and the merge is not lost — and reported on the config line:
+     * what was added, skipped and dropped, each with its reason. A read that throws or a file
+     * that fails to decode is reported and writes nothing; a write the store refuses (an
+     * overflow) keeps [update]'s own "write rejected" line. The report lands after the store's
+     * "written" line, which `update` sets before it returns. Call off main.
+     */
+    suspend fun importFrom(read: () -> String) {
+        val text = try {
+            read()
+        } catch (e: Exception) {
+            importFailed("could not read: ${e.message ?: e}")
+            return
+        }
+        val decoded = when (val d = ConfigCodec.decode(text)) {
+            is DecodeResult.Failed -> {
+                importFailed(d.reason)
+                return
+            }
+            is DecodeResult.Ok -> d
+        }
+        var result: MergeResult? = null
+        val outcome = update { current ->
+            ConfigMerge.merge(current, decoded).also { result = it }.config
+        }
+        if (outcome !is ConfigStore.UpdateOutcome.Applied) return
+        val r = checkNotNull(result) { "Applied, so the edit ran" }
+        log.i(
+            "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
+                "dropped=${r.dropped.size}"
+        )
+        _state.update { it.copy(configState = importLine(r)) }
+    }
+
+    private fun importFailed(reason: String) {
+        log.w("CONFIG_IMPORT_FAILED $reason")
+        _state.update { it.copy(configState = "config: import failed: $reason") }
+    }
+
+    /** `config: N shortcut(s), imported: a added, s skipped (id: reason; …), d dropped (#i id:
+     *  reason; …)` — a parenthesis only when its count is non-zero; a drop as the load report
+     *  formats one. */
+    private fun importLine(r: MergeResult): String = buildString {
+        append("config: ${r.config.shortcuts.size} shortcut(s), imported: ")
+        append("${r.added.size} added, ${r.skipped.size} skipped")
+        if (r.skipped.isNotEmpty()) {
+            append(r.skipped.joinToString("; ", " (", ")") { "${it.id}: ${it.reason}" })
+        }
+        append(", ${r.dropped.size} dropped")
+        if (r.dropped.isNotEmpty()) {
+            append(r.dropped.joinToString("; ", " (", ")") { d ->
+                "#${d.index} ${d.id ?: "?"}: ${d.reason}"
+            })
+        }
     }
 
     /**

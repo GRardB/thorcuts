@@ -10,6 +10,7 @@ import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
 import com.grardb.thorcuts.core.model.TriggerStyle
@@ -25,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -679,5 +681,92 @@ class ThorcutsCoordinatorTest {
         c.startRecording()                                      // live again: a recording
         assertEquals(TriggerRecorder(), c.recording.value)
         assertEquals(listOf("start", "start", "capture on"), channel.calls)
+    }
+
+    // ── import and export ─────────────────────────────────────────────────────────────
+
+    /** BTN_WEST — the Y button; BTN_EAST — the B button. */
+    private val y = Control(Device.PAD, EvdevType.KEY, 308, 1)
+    private val b = Control(Device.PAD, EvdevType.KEY, 305, 1)
+
+    /** AYN + Y, a tap → go home on the focused screen: a trigger the seeded file lacks. */
+    private val home = Shortcut(
+        id = "home",
+        trigger = Trigger(setOf(ModifierKey.AYN), setOf(y)),
+        action = Action.GoHome(ScreenTarget.FOCUSED),
+    )
+
+    /**
+     * The merge test's import file, in this order: `home` is new; `swap-screens` repeats a
+     * PRESENT id (its trigger here, AYN + B, repeats nothing in the file, so the codec accepts
+     * every entry and the skip is the merge's, not a drop); `swap2` carries the CURRENT swap's
+     * trigger under a new id; `bad` names an action kind that does not exist — the model would
+     * refuse to build it, so it is spliced in as text, last.
+     */
+    private val importFile: String
+        get() {
+            val present = swap.copy(trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
+            val sameTrigger = swap.copy(id = "swap2")
+            val valid = ConfigCodec.encode(ThorcutsConfig(listOf(home, present, sameTrigger)))
+            val bad = """{"id":"bad","trigger":{"modifiers":["AYN"],"style":"PRESS"},""" +
+                """"action":{"kind":"Teleport"}}"""
+            return valid.replace("\n  ]\n}", ",\n$bad\n  ]\n}")
+        }
+
+    @Test
+    fun `importFrom merges, reports every outcome with its reason, and pushes`() {
+        val c = coordinator()
+        c.setEnabled(true)
+        channel.emit(HelperMessage.Ready(2))
+        assertEquals(listOf(1), channel.pushed.map { it.ruleCount })
+        runBlocking { c.importFrom { importFile } }
+        val line = "config: 2 shortcut(s), imported: 1 added, 2 skipped (swap-screens: id " +
+            "already present; swap2: 'swap2' repeats the trigger of 'swap-screens' " +
+            "everywhere), 1 dropped (#3 bad: unknown action kind 'Teleport')"
+        assertEquals(line, c.state.value.configState)
+        assertEquals(listOf("swap-screens", "home"), c.config.value.shortcuts.map { it.id })
+        assertEquals(home, c.config.value.shortcut("home"))
+        assertEquals(ConfigCodec.encode(c.config.value), file.text)
+        assertEquals(listOf(1, 2), channel.pushed.map { it.ruleCount })   // the merged list
+        assertTrue(log.has("CONFIG_IMPORT added=1 skipped=2 dropped=1"))
+    }
+
+    @Test
+    fun `an import that fails to decode writes nothing and says why`() {
+        val c = coordinator()
+        val before = file.text
+        // "{" is what the parser refuses; a bare word is a lenient literal, "not an object".
+        runBlocking { c.importFrom { "{" } }
+        assertTrue(c.state.value.configState.startsWith("config: import failed: not JSON:"))
+        assertEquals(before, file.text)
+        assertTrue(file.writes.isEmpty())
+        assertTrue(log.has("CONFIG_IMPORT_FAILED not JSON:"))
+    }
+
+    @Test
+    fun `an import whose reader throws is reported, and nothing is written`() {
+        val c = coordinator()
+        runBlocking { c.importFrom { throw IOException("gone") } }
+        assertEquals("config: import failed: could not read: gone", c.state.value.configState)
+        assertTrue(file.writes.isEmpty())
+        assertTrue(log.has("CONFIG_IMPORT_FAILED could not read: gone"))
+    }
+
+    @Test
+    fun `exportTo hands the encoded config to the writer and says so`() {
+        val c = coordinator()
+        var written: String? = null
+        c.exportTo { written = it }
+        assertEquals(ConfigCodec.encode(ThorcutsConfig(listOf(swap))), written)
+        assertEquals("config: exported 1 shortcut(s)", c.state.value.configState)
+        assertTrue(log.has("CONFIG_EXPORT shortcuts=1"))
+    }
+
+    @Test
+    fun `an export whose writer throws is reported, not thrown`() {
+        val c = coordinator()
+        c.exportTo { throw IOException("disk full") }
+        assertEquals("config: export failed: disk full", c.state.value.configState)
+        assertTrue(log.has("CONFIG_EXPORT_FAILED disk full"))
     }
 }
