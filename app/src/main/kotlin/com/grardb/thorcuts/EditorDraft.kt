@@ -96,8 +96,10 @@ object Copy {
     const val NO_APPS = "No apps chosen yet"
     const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
         "release — it will feel late in that game."
+    const val NOTIFICATION = "Android shows a small notification while shortcuts are on — " +
+        "tap here to change or hide it."
+    const val NO_SHORTCUTS = "No shortcuts yet — add one below."
     val NOTES = listOf(
-        "The notification is the sign the helper is alive.",
         "Force stop in Settings, or Stop in the system's active-apps chip, turns shortcuts off " +
             "until Thorcuts is next opened.",
         "After an app is moved onto the top screen, the stock launcher may show there until " +

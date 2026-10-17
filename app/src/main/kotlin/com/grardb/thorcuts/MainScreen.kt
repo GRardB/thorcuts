@@ -54,7 +54,7 @@ fun ThorcutsScreen(vm: ThorcutsViewModel) {
 }
 
 /**
- * The switch, the three status lines, the notes, the shortcut list, Add — ONE scrolling list,
+ * The switch, the four status lines, the notes, the shortcut list, Add — ONE scrolling list,
  * so nothing is ever pushed off the Thor's shorter bottom panel: the header is as tall as its
  * status lines and notes happen to be (a rejected write's reason wraps; a larger system font
  * grows everything), and the rows and the Add button scroll with it. (Task 5's review: a
@@ -88,6 +88,10 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
+    // The keep-alive notification's channel page, where the user can hide it.
+    val onNotification: () -> Unit = {
+        context.startActivity(KeepAliveChannel.settings(context))
+    }
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -99,7 +103,7 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        item { Header(state, onSwitch, onMonitor) }
+        item { Header(state, onSwitch, onMonitor, onNotification) }
         items(state.shortcuts, key = { it.id }) { s ->
             ShortcutRow(
                 shortcut = s,
@@ -115,9 +119,14 @@ private fun MainScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyLis
     }
 }
 
-/** Everything above the rows: the title, the switch, the three status lines, the notes. */
+/** Everything above the rows: the title, the switch, the four status lines, the notes. */
 @Composable
-private fun Header(state: UiState, onSwitch: () -> Unit, onMonitor: () -> Unit) {
+private fun Header(
+    state: UiState,
+    onSwitch: () -> Unit,
+    onMonitor: () -> Unit,
+    onNotification: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Thorcuts", style = MaterialTheme.typography.titleMedium)
 
@@ -151,12 +160,17 @@ private fun Header(state: UiState, onSwitch: () -> Unit, onMonitor: () -> Unit) 
                 modifier = Modifier.clickable(onClick = onMonitor),
             )
         }
+        Text(
+            Copy.NOTIFICATION,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.clickable(onClick = onNotification),
+        )
         for (note in Copy.NOTES) Text(note, style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
         Text("Shortcuts", style = MaterialTheme.typography.labelMedium)
         if (state.shortcuts.isEmpty()) {
-            Text("No shortcuts yet.", style = MaterialTheme.typography.bodyMedium)
+            Text(Copy.NO_SHORTCUTS, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
