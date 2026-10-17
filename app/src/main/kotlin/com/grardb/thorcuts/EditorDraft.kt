@@ -58,9 +58,13 @@ fun ScreenTarget.label(): String = when (this) {
     ScreenTarget.FOCUSED -> "the focused screen"
 }
 
-/** The same, as the editor's choice names it: FOCUSED explained once, where it is chosen. */
-fun ScreenTarget.choiceLabel(): String =
-    if (this == ScreenTarget.FOCUSED) FOCUSED_EXPLAINED else label()
+/** The same, as the editor's nested choice names it — sentence case, FOCUSED explained once,
+ *  where it is chosen. */
+fun ScreenTarget.choiceLabel(): String = when (this) {
+    ScreenTarget.TOP -> "Top screen"
+    ScreenTarget.BOTTOM -> "Bottom screen"
+    ScreenTarget.FOCUSED -> FOCUSED_EXPLAINED
+}
 
 /** An action as the list names it: "Close the app on the focused screen". */
 fun Action.label(): String {
@@ -79,7 +83,7 @@ fun Scope.line(): String? = when (this) {
 }
 
 const val FOCUSED_EXPLAINED =
-    "the focused screen — the one you last touched or that last took input"
+    "Focused screen — the one you last touched or that last took input"
 
 /** The editor's copy, pinned by the spec. */
 object Copy {
@@ -88,7 +92,7 @@ object Copy {
     const val NOT_RECORDED = "Not recorded yet"
     const val RECORD = "Record"
     const val RECORD_OFF = "Turn shortcuts on to record"
-    const val NEEDS_MODIFIER = "A shortcut starts with AYN, Home, Back, Start or Select."
+    const val NEEDS_MODIFIER = "A shortcut must start with AYN, Home, Back, Start or Select."
     const val MODIFIER_NOTE = "A shortcut on Start or Select makes a plain tap of that button " +
         "reach the game only when it is released."
     const val NO_APPS = "No apps chosen yet"
@@ -131,7 +135,7 @@ data class EditorDraft(
             null
         } else {
             holdMs.trim().toIntOrNull()
-                ?: throw IllegalArgumentException("the timer needs a number of milliseconds")
+                ?: throw IllegalArgumentException("The timer must be a number of milliseconds")
         }
         val style = if (timer) TriggerStyle.HOLD else TriggerStyle.PRESS
         return Trigger(modifiers, buttons, style, ms)
@@ -156,7 +160,7 @@ data class EditorDraft(
         ScopeKind.ONLY -> { requireApps(); Scope.Apps(apps) }
     }
 
-    private fun requireApps() = require(apps.isNotEmpty()) { "choose at least one app" }
+    private fun requireApps() = require(apps.isNotEmpty()) { "Choose at least one app" }
 
     /** The recorded combo as text: the trigger's description when it is one, else the names
      *  pressed so far (no modifier yet), else "Not recorded yet". */

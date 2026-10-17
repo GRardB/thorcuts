@@ -200,12 +200,14 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     fun add() {
         draftSession++
         draft.value = EditorDraft()
+        ensureApps()
     }
 
     fun edit(id: String) {
         val s = coordinator.config.value.shortcut(id) ?: return
         draftSession++
         draft.value = EditorDraft.of(s)
+        ensureApps()
     }
 
     fun setScope(kind: ScopeKind) = change { it.copy(scope = kind) }
@@ -215,13 +217,19 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(apps = apps)
     }
 
-    /**
-     * Open the picker at once, and resolve the installed-app list the first time — off main,
-     * since each app's icon is rendered to a bitmap on the way (tens of apps, a few hundred
-     * ms); the picker shows a spinner until the list lands. Resolved once per ViewModel.
-     */
+    /** Open the picker at once; the app list is resolved if it was not already. */
     fun openPicker() {
         change { it.copy(picker = true) }
+        ensureApps()
+    }
+
+    /**
+     * Resolve the installed-app list the first time it is needed — the editor opening (its
+     * chosen apps show by icon and name) or the picker — off main, since each app's icon is
+     * rendered to a bitmap on the way (tens of apps, a few hundred ms); `loadingApps` is set
+     * meanwhile and the picker shows a spinner. Resolved once per ViewModel.
+     */
+    private fun ensureApps() {
         if (local.value.installed.isNotEmpty() || local.value.loadingApps) return
         local.update { it.copy(loadingApps = true) }
         viewModelScope.launch {

@@ -37,7 +37,7 @@ private val PIECE_HEIGHT = 28.dp
 /** The drawable for a glyph, and how far to turn it: the one arrow serves four directions. */
 private fun Glyph.resource(): Int = when (this) {
     Glyph.HOME -> R.drawable.ic_glyph_home
-    Glyph.BACK -> R.drawable.ic_glyph_back
+    Glyph.BACK -> R.drawable.ic_glyph_undo
     Glyph.PLAY -> R.drawable.ic_glyph_play
     Glyph.SQUARE -> R.drawable.ic_glyph_square
     Glyph.UP, Glyph.DOWN, Glyph.LEFT, Glyph.RIGHT -> R.drawable.ic_glyph_arrow

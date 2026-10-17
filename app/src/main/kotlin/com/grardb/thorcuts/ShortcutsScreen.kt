@@ -31,7 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.grardb.thorcuts.core.model.Shortcut
 
-private const val TITLE = "Shortcuts"
+private const val TITLE = "Thorcuts enabled"
 private const val ADD = "Add shortcut"
 private const val EMPTY = "No shortcuts yet"
 private const val NEEDS_MONITOR = "Per-app shortcuts need the accessibility service."

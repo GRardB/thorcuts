@@ -6,6 +6,7 @@ import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
 import kotlin.test.Test
@@ -13,7 +14,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class EditorDraftTest {
 
@@ -57,7 +57,7 @@ class EditorDraftTest {
     fun `except or only with no app chosen is refused`() {
         for (kind in listOf(ScopeKind.EXCEPT, ScopeKind.ONLY)) {
             val e = assertFailsWith<IllegalArgumentException> { base(kind).toShortcut() }
-            assertEquals("choose at least one app", e.message)
+            assertEquals("Choose at least one app", e.message)
         }
     }
 
@@ -76,7 +76,18 @@ class EditorDraftTest {
         val e = assertFailsWith<IllegalArgumentException> {
             base().copy(timer = true, holdMs = "x").toShortcut()
         }
-        assertEquals("the timer needs a number of milliseconds", e.message)
+        assertEquals("The timer must be a number of milliseconds", e.message)
+    }
+
+    @Test
+    fun `the screen choices read in sentence case, the focused one explained`() {
+        assertEquals("Top screen", ScreenTarget.TOP.choiceLabel())
+        assertEquals("Bottom screen", ScreenTarget.BOTTOM.choiceLabel())
+        assertEquals(
+            "Focused screen — the one you last touched or that last took input",
+            ScreenTarget.FOCUSED.choiceLabel(),
+        )
+        assertEquals("the focused screen", ScreenTarget.FOCUSED.label())   // mid-sentence
     }
 
     @Test
