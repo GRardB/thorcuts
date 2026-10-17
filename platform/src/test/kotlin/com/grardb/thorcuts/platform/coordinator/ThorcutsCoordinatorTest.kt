@@ -96,6 +96,7 @@ class ThorcutsCoordinatorTest {
         assertTrue(c.config.value.shortcuts.isEmpty())          // the EMPTY default (M5)
         assertTrue(c.state.value.enabled)
         assertFalse(c.state.value.running)
+        assertNull(c.state.value.failure)
         assertTrue(channel.calls.isEmpty())
         assertTrue(held.isEmpty())
         assertTrue(log.has("CONFIG_LOAD created=true shortcuts=0 dropped=0"))
@@ -159,10 +160,15 @@ class ThorcutsCoordinatorTest {
         c.setEnabled(true)
         assertFalse(c.state.value.running)
         assertEquals("could not bind the helper socket", c.state.value.helperState)
+        assertEquals("could not bind the helper socket", c.state.value.failure)
         assertEquals(listOf(true, false), held)
         assertTrue(c.state.value.enabled)
         assertNull(c.state.value.transition)
         assertTrue(log.has("HELPER_START outcome=NOT_BOUND"))
+        c.setEnabled(false)                                     // the user retries: OFF, ON
+        channel.outcome = HelperChannel.Start.STARTED
+        c.setEnabled(true)
+        assertNull(c.state.value.failure)                       // cleared by the start
     }
 
     @Test
@@ -347,6 +353,7 @@ class ThorcutsCoordinatorTest {
         assertFalse(c.state.value.running)
         assertFalse(c.state.value.helperLive)
         assertEquals("gave up: exited: signal, twice in a minute", c.state.value.helperState)
+        assertEquals("gave up: exited: signal, twice in a minute", c.state.value.failure)
         assertEquals(listOf(true, false), held)
         assertEquals(listOf("start", "start"), channel.calls)
         assertNull(c.state.value.transition)
@@ -383,8 +390,10 @@ class ThorcutsCoordinatorTest {
         now = 30_000
         channel.emit(HelperMessage.Exiting("signal"))          // gave up: off
         assertFalse(c.state.value.enabled)
+        assertNotNull(c.state.value.failure)
         now = 31_000
         c.setEnabled(true)                                      // the user tries again
+        assertNull(c.state.value.failure)                       // the retry clears it
         assertEquals(listOf("start", "start", "start"), channel.calls)
         now = 32_000
         channel.emit(HelperMessage.Exiting("signal"))          // 2 s after the last loss
@@ -405,6 +414,7 @@ class ThorcutsCoordinatorTest {
         assertFalse(c.state.value.enabled)
         assertFalse(c.state.value.running)
         assertEquals("gave up: could not bind the helper socket", c.state.value.helperState)
+        assertEquals("gave up: could not bind the helper socket", c.state.value.failure)
         assertEquals(listOf(true, false), held)
         assertNull(c.state.value.transition)
         assertTrue(log.has("RELAUNCH gave up: could not bind the helper socket"))
@@ -719,11 +729,12 @@ class ThorcutsCoordinatorTest {
         c.setEnabled(true)
         channel.emit(HelperMessage.Ready(2))
         assertEquals(listOf(1), channel.pushed.map { it.ruleCount })
-        runBlocking { c.importFrom { importFile } }
+        val returned = runBlocking { c.importFrom { importFile } }
         val line = "config: 2 shortcut(s), imported: 1 added, 2 skipped (swap-screens: id " +
             "already present; swap2: 'swap2' repeats the trigger of 'swap-screens' " +
             "everywhere), 1 dropped (#3 bad: unknown action kind 'Teleport')"
         assertEquals(line, c.state.value.configState)
+        assertEquals(line.removePrefix("config: "), returned)   // the snackbar's text
         assertEquals(listOf("swap-screens", "home"), c.config.value.shortcuts.map { it.id })
         assertEquals(home, c.config.value.shortcut("home"))
         assertEquals(ConfigCodec.encode(c.config.value), file.text)
@@ -735,11 +746,13 @@ class ThorcutsCoordinatorTest {
     fun `an import with nothing skipped or dropped reports plain counts`() {
         val c = coordinator()
         val only = swap.copy(id = "b-only", trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
-        runBlocking { c.importFrom { ConfigCodec.encode(ThorcutsConfig(listOf(only))) } }
+        val returned =
+            runBlocking { c.importFrom { ConfigCodec.encode(ThorcutsConfig(listOf(only))) } }
         assertEquals(
             "config: 2 shortcut(s), imported: 1 added, 0 skipped, 0 dropped",
             c.state.value.configState,
         )
+        assertEquals("2 shortcut(s), imported: 1 added, 0 skipped, 0 dropped", returned)
         assertEquals(listOf("swap-screens", "b-only"), c.config.value.shortcuts.map { it.id })
     }
 
@@ -748,8 +761,9 @@ class ThorcutsCoordinatorTest {
         val c = coordinator()
         val before = file.text
         // "{" is what the parser refuses; a bare word is a lenient literal, "not an object".
-        runBlocking { c.importFrom { "{" } }
+        val returned = runBlocking { c.importFrom { "{" } }
         assertTrue(c.state.value.configState.startsWith("config: import failed: not JSON:"))
+        assertTrue(returned.startsWith("import failed: not JSON:"))
         assertEquals(before, file.text)
         assertTrue(file.writes.isEmpty())
         assertTrue(log.has("CONFIG_IMPORT_FAILED not JSON:"))
@@ -758,8 +772,9 @@ class ThorcutsCoordinatorTest {
     @Test
     fun `an import whose reader throws is reported, and nothing is written`() {
         val c = coordinator()
-        runBlocking { c.importFrom { throw IOException("gone") } }
+        val returned = runBlocking { c.importFrom { throw IOException("gone") } }
         assertEquals("config: import failed: could not read: gone", c.state.value.configState)
+        assertEquals("import failed: could not read: gone", returned)
         assertTrue(file.writes.isEmpty())
         assertTrue(log.has("CONFIG_IMPORT_FAILED could not read: gone"))
     }
@@ -768,17 +783,19 @@ class ThorcutsCoordinatorTest {
     fun `exportTo hands the encoded config to the writer and says so`() {
         val c = coordinator()
         var written: String? = null
-        c.exportTo { written = it }
+        val returned = c.exportTo { written = it }
         assertEquals(ConfigCodec.encode(ThorcutsConfig(listOf(swap))), written)
         assertEquals("config: exported 1 shortcut(s)", c.state.value.configState)
+        assertEquals("exported 1 shortcut(s)", returned)
         assertTrue(log.has("CONFIG_EXPORT shortcuts=1"))
     }
 
     @Test
     fun `an export whose writer throws is reported, not thrown`() {
         val c = coordinator()
-        c.exportTo { throw IOException("disk full") }
+        val returned = c.exportTo { throw IOException("disk full") }
         assertEquals("config: export failed: disk full", c.state.value.configState)
+        assertEquals("export failed: disk full", returned)
         assertTrue(log.has("CONFIG_EXPORT_FAILED disk full"))
     }
 }

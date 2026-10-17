@@ -44,10 +44,12 @@ private const val PANIC = "panic combo"
 
 /**
  * What the holder shows: the switch and its transition, whether the helper runs and is live,
- * the three status lines the main screen renders, and its own record — [lastOutcome] and
- * [eventLog], rendered by nothing since the diagnostics screen went (the editor spec's
- * decision) and asserted by its tests. Held by [ThorcutsCoordinator] for the life of the
- * process, so a screen closed and reopened reads the same state and the same log.
+ * why the last start failed when it did ([failure] — the one line the main screen keeps of
+ * the three status lines since the UI polish; those three stay for the log and the tests),
+ * and its own record — [lastOutcome] and [eventLog], rendered by nothing since the
+ * diagnostics screen went (the editor spec's decision) and asserted by its tests. Held by
+ * [ThorcutsCoordinator] for the life of the process, so a screen closed and reopened reads
+ * the same state and the same log.
  */
 data class CoordinatorState(
     /** The persisted switch: shortcuts are wanted on. */
@@ -67,6 +69,10 @@ data class CoordinatorState(
      *  in flight — the switch button is disabled on it, and so is every other caller — and
      *  null otherwise. */
     val transition: String? = null,
+    /** The reason the last start failed or the relaunch chain gave up — shown under the
+     *  switch, which then reads ON with nothing running (a failed start) or OFF (a give-up).
+     *  Null otherwise, and null again once the next start is decided. */
+    val failure: String? = null,
     val helperState: String = "not started",
     /** Its own slot: an ack lands milliseconds after "ready, N devices" and must not
      *  overwrite it. */
@@ -303,30 +309,37 @@ class ThorcutsCoordinator(
         val outcome = store.update(edit)
         if (outcome is ConfigStore.UpdateOutcome.Rejected) {
             log.w("CONFIG_WRITE_REJECTED ${outcome.reason}")
-            _state.update { it.copy(configState = "config: write rejected: ${outcome.reason}") }
+            configLine("write rejected: ${outcome.reason}")
         }
+        return outcome
+    }
+
+    /** Put [outcome] on the config line and return it: what the screen shows as a snackbar
+     *  (the UI polish), without the line's `config: ` prefix. */
+    private fun configLine(outcome: String): String {
+        _state.update { it.copy(configState = "config: $outcome") }
         return outcome
     }
 
     /**
      * Export: the current config, encoded, handed to [write] — the ViewModel's write into the
      * file the user picked (parent §10: "export is the file"). The outcome goes to the config
-     * line. [write] is foreign I/O, so whatever it throws becomes that line and not a crash
-     * (the store treats the edit lambda the same way). Call off main; the ViewModel does.
+     * line and is returned, for the snackbar. [write] is foreign I/O, so whatever it throws
+     * becomes that line and not a crash (the store treats the edit lambda the same way). Call
+     * off main; the ViewModel does.
      */
-    fun exportTo(write: (String) -> Unit) {
+    fun exportTo(write: (String) -> Unit): String {
         val config = store.config.value
         try {
             write(ConfigCodec.encode(config))
         } catch (e: Exception) {
             val reason = e.message ?: e.toString()
             log.w("CONFIG_EXPORT_FAILED $reason")
-            _state.update { it.copy(configState = "config: export failed: $reason") }
-            return
+            return configLine("export failed: $reason")
         }
         val n = config.shortcuts.size
         log.i("CONFIG_EXPORT shortcuts=$n")
-        _state.update { it.copy(configState = "config: exported $n shortcut(s)") }
+        return configLine("exported $n shortcut(s)")
     }
 
     /**
@@ -336,45 +349,44 @@ class ThorcutsCoordinator(
      * what was added, skipped and dropped, each with its reason. A read that throws or a file
      * that fails to decode is reported and writes nothing; a write the store refuses (an
      * overflow) keeps [update]'s own "write rejected" line. The report lands after the store's
-     * "written" line, which `update` sets before it returns. Call off main.
+     * "written" line, which `update` sets before it returns. Whatever was reported is also
+     * returned, for the snackbar. Call off main.
      */
-    suspend fun importFrom(read: () -> String) {
+    suspend fun importFrom(read: () -> String): String {
         val text = try {
             read()
         } catch (e: Exception) {
-            importFailed("could not read: ${e.message ?: e}")
-            return
+            return importFailed("could not read: ${e.message ?: e}")
         }
         val decoded = when (val d = ConfigCodec.decode(text)) {
-            is DecodeResult.Failed -> {
-                importFailed(d.reason)
-                return
-            }
+            is DecodeResult.Failed -> return importFailed(d.reason)
             is DecodeResult.Ok -> d
         }
         var result: MergeResult? = null
         val outcome = update { current ->
             ConfigMerge.merge(current, decoded).also { result = it }.config
         }
-        if (outcome !is ConfigStore.UpdateOutcome.Applied) return
+        if (outcome is ConfigStore.UpdateOutcome.Rejected) {
+            return "write rejected: ${outcome.reason}"
+        }
         val r = checkNotNull(result) { "Applied, so the edit ran" }
         log.i(
             "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
                 "dropped=${r.dropped.size}"
         )
-        _state.update { it.copy(configState = importLine(r)) }
+        return configLine(importLine(r))
     }
 
-    private fun importFailed(reason: String) {
+    private fun importFailed(reason: String): String {
         log.w("CONFIG_IMPORT_FAILED $reason")
-        _state.update { it.copy(configState = "config: import failed: $reason") }
+        return configLine("import failed: $reason")
     }
 
-    /** `config: N shortcut(s), imported: a added, s skipped (id: reason; …), d dropped (#i id:
+    /** `N shortcut(s), imported: a added, s skipped (id: reason; …), d dropped (#i id:
      *  reason; …)` — a parenthesis only when its count is non-zero; a drop as the load report
-     *  formats one. */
+     *  formats one. [configLine] adds the prefix. */
     private fun importLine(r: MergeResult): String = buildString {
-        append("config: ${r.config.shortcuts.size} shortcut(s), imported: ")
+        append("${r.config.shortcuts.size} shortcut(s), imported: ")
         append("${r.added.size} added, ${r.skipped.size} skipped")
         if (r.skipped.isNotEmpty()) {
             append(r.skipped.joinToString("; ", " (", ")") { "${it.id}: ${it.reason}" })
@@ -442,6 +454,7 @@ class ThorcutsCoordinator(
                 Verdict.IGNORED -> s
                 Verdict.START -> s.copy(
                     enabled = true, running = true, transition = STARTING, tableState = NO_TABLE,
+                    failure = null,
                 )
                 else -> s.copy(enabled = enabled)
             }
@@ -523,7 +536,9 @@ class ThorcutsCoordinator(
                 if (relaunch) {
                     giveUp(failed)
                 } else {
-                    _state.update { it.copy(running = false, helperState = failed) }
+                    _state.update {
+                        it.copy(running = false, helperState = failed, failure = failed)
+                    }
                     release()
                 }
             }
@@ -533,7 +548,8 @@ class ThorcutsCoordinator(
             // claim a helper that never started: say so, release, and let the scope's
             // handler log the throw.
             withdrawOwed()
-            _state.update { it.copy(running = false, helperState = "start failed: $t") }
+            val reason = "start failed: $t"
+            _state.update { it.copy(running = false, helperState = reason, failure = reason) }
             release()
             throw t
         } finally {
@@ -563,7 +579,8 @@ class ThorcutsCoordinator(
      *  loss would turn it off, and the process is released. */
     private fun giveUp(reason: String) {
         val epoch = switchOff()
-        _state.update { it.copy(running = false, helperState = "gave up: $reason") }
+        val text = "gave up: $reason"
+        _state.update { it.copy(running = false, helperState = text, failure = text) }
         log.w("RELAUNCH gave up: $reason")
         row("GAVE UP: $reason")
         writeSwitch(false, epoch, by = "gave-up")
@@ -641,11 +658,12 @@ class ThorcutsCoordinator(
             // with no other owner ends here. A "starting…" belongs to an attempt in flight,
             // which ends its own.
             val ended = if (owed && s.transition == RESTARTING) null else s.transition
+            val gaveUp = "gave up: $helperState, twice in a minute"
             when (verdict) {
                 Loss.RELAUNCH -> gone.copy(transition = s.transition ?: RESTARTING)
                 Loss.GIVE_UP -> gone.copy(
                     enabled = false, running = false, transition = ended,
-                    helperState = "gave up: $helperState, twice in a minute",
+                    helperState = gaveUp, failure = gaveUp,
                 )
                 Loss.RELEASE -> gone.copy(running = false, transition = ended)
                 Loss.STOPPING -> gone.copy(running = false)

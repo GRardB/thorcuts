@@ -51,4 +51,15 @@ class ThorControlsTest {
         assertEquals("Home + D-pad left", ThorControls.describe(dpad))
         assertEquals("AYN", ThorControls.describe(Trigger(setOf(ModifierKey.AYN))))
     }
+
+    @Test
+    fun `modifiers and buttons are the lists describe joins, for the pieces to draw`() {
+        val both = setOf(ModifierKey.SELECT, ModifierKey.START)
+        val combo = Trigger(both, setOf(padKey(311), padKey(304)))
+        assertEquals(listOf(ModifierKey.START, ModifierKey.SELECT), ThorControls.modifiers(combo))
+        assertEquals(listOf(padKey(304), padKey(311)), ThorControls.buttons(combo))
+        val bare = Trigger(setOf(ModifierKey.AYN))
+        assertEquals(listOf(ModifierKey.AYN), ThorControls.modifiers(bare))
+        assertEquals(emptyList(), ThorControls.buttons(bare))
+    }
 }

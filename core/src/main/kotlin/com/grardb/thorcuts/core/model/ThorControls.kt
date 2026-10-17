@@ -47,11 +47,20 @@ object ThorControls {
         }
     }
 
-    /** `AYN + X`, `Select + R1 · timer 400 ms`: the modifiers in the fixed order, then the
-     *  buttons in [ORDER], then the timer when there is one. */
+    /** The trigger's modifiers in the fixed order: what [describe] lists first, and what the
+     *  app draws as pieces. */
+    fun modifiers(trigger: Trigger): List<ModifierKey> =
+        ModifierKey.entries.filter { it in trigger.modifiers }
+
+    /** The trigger's buttons in [ORDER]: what [describe] lists after the modifiers, and what
+     *  the app draws after them. */
+    fun buttons(trigger: Trigger): List<Control> = trigger.buttons.sortedWith(ORDER)
+
+    /** `AYN + X`, `Select + R1 · timer 400 ms`: [modifiers], then [buttons], then the timer
+     *  when there is one. */
     fun describe(trigger: Trigger): String {
-        val modifiers = ModifierKey.entries.filter { it in trigger.modifiers }.map { name(it) }
-        val buttons = trigger.buttons.sortedWith(ORDER).map { name(it) }
+        val modifiers = modifiers(trigger).map { name(it) }
+        val buttons = buttons(trigger).map { name(it) }
         val combo = (modifiers + buttons).joinToString(" + ")
         return if (trigger.style == TriggerStyle.HOLD) "$combo · timer ${trigger.holdMs} ms"
         else combo
