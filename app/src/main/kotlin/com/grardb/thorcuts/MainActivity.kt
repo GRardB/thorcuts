@@ -4,17 +4,17 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.ui.graphics.Color
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ThorcutsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Transparent system bars with the right icon contrast for the system's light or dark
+        // setting; the shell pads for them (safeDrawingPadding), so nothing sits under one.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         // Logged so a screen swap can be checked for an Activity RECREATE, which
@@ -30,23 +30,7 @@ class MainActivity : ComponentActivity() {
                 " savedState=${savedInstanceState != null}",
         )
 
-        setContent {
-            // Always dark, on TRUE black rather than Material's dark grey: that is
-            // the look this app wants, and on the Thor's AMOLED panels a black
-            // pixel is an OFF pixel, so it costs no power either.
-            //
-            // The foreground colours are Material 3's dark defaults — near-white
-            // on black, at full contrast.
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background = Color.Black,
-                    surface = Color.Black,
-                )
-            ) {
-                Surface(color = Color.Black) {
-                    ThorcutsScreen(viewModel)
-                }
-            }
-        }
+        // The theme (light, or dark with the system) is the shell's: Theme.kt, Shell.kt.
+        setContent { ThorcutsScreen(viewModel) }
     }
 }

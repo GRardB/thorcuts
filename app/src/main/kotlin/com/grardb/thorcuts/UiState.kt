@@ -20,9 +20,6 @@ data class UiState(
     val failure: String?,
     /** The helper is up and ready: Record is offered exactly then. */
     val helperLive: Boolean,
-    val helperState: String,
-    val tableState: String,
-    val configState: String,
     val shortcuts: List<Shortcut>,
     /** Non-null while the editor is open. */
     val editor: EditorDraft?,
@@ -33,10 +30,6 @@ data class UiState(
     /** ConflictDetector's warning on the draft's trigger, as copy; null when there is none, or
      *  the draft is not yet a trigger. */
     val warning: String?,
-    /** The accessibility service is connected: the app in front is being reported. */
-    val monitor: Boolean,
-    /** The package in front, or null: no monitor, nothing focused, or not yet known. */
-    val foreground: String?,
     /** A shortcut has a per-app scope while the accessibility service is off: the notice that
      *  says so shows exactly then. */
     val needsMonitor: Boolean,

@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- DayNight so the window's own background (what shows before Compose's first frame, and
+     the splash) follows the system like the Compose theme does; the platform has no
+     DayNight.NoActionBar, so the title bar is turned off here. The bars are transparent
+     (enableEdgeToEdge in MainActivity) and the Compose shell pads for them. -->
 <resources>
-    <style name="Theme.Thorcuts" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.Thorcuts" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
 </resources>

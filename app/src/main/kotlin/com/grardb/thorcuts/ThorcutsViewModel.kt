@@ -97,9 +97,6 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         transition = c.transition,
         failure = c.failure,
         helperLive = c.helperLive,
-        helperState = c.helperState,
-        tableState = c.tableState,
-        configState = c.configState,
         shortcuts = config.shortcuts,
         editor = d,
         recording = recording,
@@ -113,8 +110,6 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
                     ConflictDetector.Warning.HOLD_ON_GAMEPLAY_MODIFIER -> Copy.LATE
                 }
             },
-        monitor = c.monitor,
-        foreground = c.foreground,
         needsMonitor = needsMonitor(config.shortcuts, c.monitor),
         apps = l.installed,
         loadingApps = l.loadingApps,

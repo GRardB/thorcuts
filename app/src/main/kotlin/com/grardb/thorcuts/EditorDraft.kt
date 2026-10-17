@@ -91,20 +91,9 @@ object Copy {
     const val NEEDS_MODIFIER = "A shortcut starts with AYN, Home, Back, Start or Select."
     const val MODIFIER_NOTE = "A shortcut on Start or Select makes a plain tap of that button " +
         "reach the game only when it is released."
-    const val MONITOR_OFF =
-        "Per-app shortcuts are off — tap to turn on the accessibility service"
     const val NO_APPS = "No apps chosen yet"
     const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
         "release — it will feel late in that game."
-    const val NO_SHORTCUTS = "No shortcuts yet — add one below."
-    val NOTES = listOf(
-        "Android shows a small notification while shortcuts are on. To hide it, long-press it " +
-            "and turn it off — shortcuts keep working.",
-        "Force stop in Settings, or Stop in the system's active-apps chip, turns shortcuts off " +
-            "until Thorcuts is next opened.",
-        "After an app is moved onto the top screen, the stock launcher may show there until " +
-            "Cocoon returns.",
-    )
 }
 
 /**
