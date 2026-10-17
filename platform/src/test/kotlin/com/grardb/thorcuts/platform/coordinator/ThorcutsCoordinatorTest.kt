@@ -752,11 +752,14 @@ class ThorcutsCoordinatorTest {
         channel.emit(HelperMessage.Ready(2))
         assertEquals(listOf(1), channel.pushed.map { it.ruleCount })
         val returned = runBlocking { c.importFrom { importFile } }
-        val line = "config: 2 shortcut(s), imported: 1 added, 2 skipped (swap-screens: id " +
+        val line = "config: 2 shortcut(s), imported: 1 added, 2 skipped (swap-screens: name " +
             "already present; swap2: 'swap2' repeats the trigger of 'swap-screens' " +
             "everywhere), 1 dropped (#3 bad: unknown action kind 'Teleport')"
         assertEquals(line, c.state.value.configState)
-        assertEquals(line.removePrefix("config: "), returned)   // the snackbar's text
+        val merged = assertIs<ImportOutcome.Merged>(returned)   // the report dialog's data
+        assertEquals(listOf("home"), merged.result.added)
+        assertEquals(listOf("swap-screens", "swap2"), merged.result.skipped.map { it.id })
+        assertEquals(listOf("bad"), merged.result.dropped.map { it.id })
         assertEquals(listOf("swap-screens", "home"), c.config.value.shortcuts.map { it.id })
         assertEquals(home, c.config.value.shortcut("home"))
         assertEquals(ConfigCodec.encode(c.config.value), file.text)
@@ -774,7 +777,7 @@ class ThorcutsCoordinatorTest {
             "config: 2 shortcut(s), imported: 1 added, 0 skipped, 0 dropped",
             c.state.value.configState,
         )
-        assertEquals("2 shortcut(s), imported: 1 added, 0 skipped, 0 dropped", returned)
+        assertEquals(listOf("b-only"), assertIs<ImportOutcome.Merged>(returned).result.added)
         assertEquals(listOf("swap-screens", "b-only"), c.config.value.shortcuts.map { it.id })
     }
 
@@ -785,7 +788,8 @@ class ThorcutsCoordinatorTest {
         // "{" is what the parser refuses; a bare word is a lenient literal, "not an object".
         val returned = runBlocking { c.importFrom { "{" } }
         assertTrue(c.state.value.configState.startsWith("config: import failed: not JSON:"))
-        assertTrue(returned.startsWith("import failed: not JSON:"))
+        val failed = assertIs<ImportOutcome.Failed>(returned)
+        assertTrue(failed.line.startsWith("import failed: not JSON:"))
         assertEquals(before, file.text)
         assertTrue(file.writes.isEmpty())
         assertTrue(log.has("CONFIG_IMPORT_FAILED not JSON:"))
@@ -796,7 +800,7 @@ class ThorcutsCoordinatorTest {
         val c = coordinator()
         val returned = runBlocking { c.importFrom { throw IOException("gone") } }
         assertEquals("config: import failed: could not read: gone", c.state.value.configState)
-        assertEquals("import failed: could not read: gone", returned)
+        assertEquals(ImportOutcome.Failed("import failed: could not read: gone"), returned)
         assertTrue(file.writes.isEmpty())
         assertTrue(log.has("CONFIG_IMPORT_FAILED could not read: gone"))
     }

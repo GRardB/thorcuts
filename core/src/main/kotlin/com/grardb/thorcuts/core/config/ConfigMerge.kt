@@ -40,7 +40,7 @@ object ConfigMerge {
         val skipped = ArrayList<Skipped>()
         for (s in imported.config.shortcuts) {
             val reason = when {
-                s.id in have -> "id already present"
+                s.id in have -> "name already present"
                 else -> ConflictDetector.conflict(accepted, s)?.reason
             }
             if (reason != null) {

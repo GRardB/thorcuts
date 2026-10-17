@@ -93,6 +93,21 @@ data class CoordinatorState(
 )
 
 /**
+ * What [ThorcutsCoordinator.importFrom] came to. The config line carries the same outcome in
+ * words; this is the structured form the app reads (the editor polish): a merge becomes the
+ * report dialog, a failure a snackbar.
+ */
+sealed interface ImportOutcome {
+    /** The merge ran and was written: what was added, skipped (with reasons) and dropped
+     *  (with reasons). */
+    data class Merged(val result: MergeResult) : ImportOutcome
+
+    /** The outcome line without its `config: ` prefix: `import failed: …` (a read that threw,
+     *  a file that failed to decode) or `write rejected: …` (the store refused the merge). */
+    data class Failed(val line: String) : ImportOutcome
+}
+
+/**
  * Parent spec §7's owner "above the screen" and §12's `ThorcutsCoordinator`: the one holder
  * of everything with a lifetime — the gateway, the actions, the dispatcher, the helper
  * channel, the config store, the persisted switch — built once per process by the
@@ -349,10 +364,10 @@ class ThorcutsCoordinator(
      * what was added, skipped and dropped, each with its reason. A read that throws or a file
      * that fails to decode is reported and writes nothing; a write the store refuses (an
      * overflow) keeps [update]'s own "write rejected" line. The report lands after the store's
-     * "written" line, which `update` sets before it returns. Whatever was reported is also
-     * returned, for the snackbar. Call off main.
+     * "written" line, which `update` sets before it returns. The outcome is also returned in
+     * its structured form ([ImportOutcome]) for the app's report dialog. Call off main.
      */
-    suspend fun importFrom(read: () -> String): String {
+    suspend fun importFrom(read: () -> String): ImportOutcome {
         val text = try {
             read()
         } catch (e: Exception) {
@@ -367,19 +382,20 @@ class ThorcutsCoordinator(
             ConfigMerge.merge(current, decoded).also { result = it }.config
         }
         if (outcome is ConfigStore.UpdateOutcome.Rejected) {
-            return "write rejected: ${outcome.reason}"
+            return ImportOutcome.Failed("write rejected: ${outcome.reason}")
         }
         val r = checkNotNull(result) { "Applied, so the edit ran" }
         log.i(
             "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
                 "dropped=${r.dropped.size}"
         )
-        return configLine(importLine(r))
+        configLine(importLine(r))
+        return ImportOutcome.Merged(r)
     }
 
-    private fun importFailed(reason: String): String {
+    private fun importFailed(reason: String): ImportOutcome.Failed {
         log.w("CONFIG_IMPORT_FAILED $reason")
-        return configLine("import failed: $reason")
+        return ImportOutcome.Failed(configLine("import failed: $reason"))
     }
 
     /** `N shortcut(s), imported: a added, s skipped (id: reason; …), d dropped (#i id:

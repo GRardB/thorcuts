@@ -42,7 +42,7 @@ class ConfigMergeTest {
         val r = ConfigMerge.merge(current, imported)
         assertEquals(listOf("a", "b", "c"), r.config.shortcuts.map { it.id })
         assertEquals(listOf("c"), r.added)
-        assertEquals(listOf(Skipped("b", "id already present")), r.skipped)
+        assertEquals(listOf(Skipped("b", "name already present")), r.skipped)
         assertEquals(imported.dropped, r.dropped)
     }
 

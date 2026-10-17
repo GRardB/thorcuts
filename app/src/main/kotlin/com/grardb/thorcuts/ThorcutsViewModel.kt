@@ -15,6 +15,7 @@ import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.ConflictDetector
 import com.grardb.thorcuts.platform.coordinator.CoordinatorState
+import com.grardb.thorcuts.platform.coordinator.ImportOutcome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -75,6 +76,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         val loadingApps: Boolean = false,
         val writing: Boolean = false,
         val message: Message? = null,
+        val report: Report? = null,
     )
 
     private val local = MutableStateFlow(Local())
@@ -115,6 +117,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         loadingApps = l.loadingApps,
         writing = l.writing,
         message = l.message,
+        report = l.report,
     )
 
     val state: StateFlow<UiState> =
@@ -190,6 +193,9 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     fun consumed(seq: Int) {
         local.update { if (it.message?.seq == seq) it.copy(message = null) else it }
     }
+
+    /** The shell's OK on the import report. */
+    fun dismissReport() = local.update { it.copy(report = null) }
 
     fun add() {
         draftSession++
@@ -344,7 +350,12 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
                     input.use { ImportReader.read(it, MAX_IMPORT_BYTES) }
                 }
             }
-            post(outcome)
+            // A merge that ran is a report (a dialog); a failure is one line (a snackbar).
+            when (outcome) {
+                is ImportOutcome.Merged ->
+                    local.update { it.copy(report = importReport(outcome.result)) }
+                is ImportOutcome.Failed -> post(outcome.line)
+            }
         }
     }
 

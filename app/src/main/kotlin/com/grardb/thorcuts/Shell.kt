@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -16,6 +19,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,6 +95,23 @@ fun ThorcutsScreen(vm: ThorcutsViewModel) {
                         else -> EditorScreen(state, editor, vm)
                     }
                 }
+            }
+            // An import's report: a dialog, since its reasons overran a snackbar on the
+            // device (the UI polish's device run); OK or a tap outside dismisses it.
+            state.report?.let { report ->
+                AlertDialog(
+                    onDismissRequest = vm::dismissReport,
+                    title = { Text(report.title) },
+                    text = {
+                        Text(
+                            report.body,
+                            modifier = Modifier.verticalScroll(rememberScrollState()),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = vm::dismissReport) { Text("OK") }
+                    },
+                )
             }
         }
     }
