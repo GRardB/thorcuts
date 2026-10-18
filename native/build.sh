@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 
 : "${ANDROID_NDK:=$HOME/Library/Android/sdk/ndk/30.0.16248370}"
 API=30
-HOST=darwin-x86_64
+: "${HOST:=darwin-x86_64}"
 CC="$ANDROID_NDK/toolchains/llvm/prebuilt/$HOST/bin/aarch64-linux-android$API-clang"
 
 if [ ! -x "$CC" ]; then
