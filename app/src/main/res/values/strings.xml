@@ -1,8 +1,8 @@
 <resources>
     <string name="app_name">Thorcuts</string>
-    <string name="status_title">Thorcuts is on</string>
-    <string name="status_text">Controller shortcuts are active. Tap to open.</string>
+    <string name="running_title">Thorcuts is on</string>
+    <string name="running_text">Shortcuts are active. Long-press to hide this.</string>
     <string name="running_channel">Running in the background</string>
-    <string name="running_channel_description">Android requires this notification while Thorcuts keeps shortcuts working with no screen open. Turning it off here hides it; shortcuts keep working.</string>
-    <string name="monitor_description">Lets Thorcuts see which app is in front on each screen, so a shortcut can apply only in the apps you choose. Thorcuts reads nothing else.</string>
+    <string name="running_channel_description">Android requires a notification while shortcuts are on. Turning it off hides the notification; shortcuts keep working.</string>
+    <string name="monitor_description">Lets Thorcuts see which app is in front on each screen, so a shortcut can apply only in the apps you choose. Thorcuts reads nothing else: no text, no input, no content.</string>
 </resources>

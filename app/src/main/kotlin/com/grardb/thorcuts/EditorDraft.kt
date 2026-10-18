@@ -119,8 +119,8 @@ object Copy {
     const val NO_APPS = "No apps chosen yet"
     const val NO_APP = "No app chosen yet"
     const val CHOOSE_APP = "Choose an app"
-    const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
-        "release — it will feel late in that game."
+    const val LATE = "With a timer, this combo reaches the app in front only after the timer " +
+        "or the release — it will feel late there."
 }
 
 /**
