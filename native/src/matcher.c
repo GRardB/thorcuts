@@ -75,6 +75,7 @@ void tc_init(tc_state *s) {
     memset(s, 0, sizeof *s);
     s->armed = -1;
     s->hold_deadline_ms = -1;
+    s->lone_deadline_ms = -1;
     s->panic_deadline_ms = -1;
 }
 
@@ -91,9 +92,20 @@ tc_set_result tc_matcher_set_table(tc_state *s, const tc_table *t) {
 
 /* ---- the session ---- */
 
+/* Nothing of ours is pending: no armed HOLD, no lone-modifier window. */
 static void disarm(tc_state *s) {
     s->armed = -1;
     s->hold_deadline_ms = -1;
+    s->lone_deadline_ms = -1;
+}
+
+/* The session is waiting on nothing but its modifiers: give the game the hold at
+   TC_LONE_MS unless a button, a fire or a pass-through decides it first. Called only
+   where evaluate() found nothing to arm. */
+static void wait_lone(tc_state *s, int64_t now_ms) {
+    if (s->held != 0 && s->npressed == 0 && !s->fired && !s->passed) {
+        s->lone_deadline_ms = now_ms + TC_LONE_MS;
+    }
 }
 
 static void fire(tc_state *s, tc_out *o, int rule) {
@@ -148,7 +160,8 @@ typedef enum { EV_FIRED, EV_ARMED, EV_WAITING, EV_PASSED, EV_NONE } eval_result;
    table, in one place: an exact PRESS with a button down fires (lowest index; PRESS
    beats HOLD on equal sets); an exact HOLD arms (a bare HOLD included); a candidate
    waits; nothing, with buttons swallowed and nothing fired, passes the session
-   through. A bare PRESS is NOT fired here — it fires on the modifier's release. */
+   through. A bare PRESS is NOT fired here — it fires on the modifier's release. A
+   wait with no button down starts the lone-modifier window (wait_lone). */
 static eval_result evaluate(tc_state *s, tc_out *o, int64_t now_ms) {
     disarm(s);
     if (s->held == 0) return EV_NONE;
@@ -180,11 +193,17 @@ static eval_result evaluate(tc_state *s, tc_out *o, int64_t now_ms) {
         s->hold_deadline_ms = now_ms + s->table.rules[ex_hold].hold_ms;
         return EV_ARMED;
     }
-    if (candidate) return EV_WAITING;
+    if (candidate) {
+        wait_lone(s, now_ms);
+        return EV_WAITING;
+    }
     if (s->npressed > 0 && !s->fired && !s->passed) {
         pass_through(s, o);
         return EV_PASSED;
     }
+    /* Modifiers held that no rule on exactly this set wants, and no button: still a
+       session (a further modifier may complete a set), but the game's at the window. */
+    wait_lone(s, now_ms);
     return EV_NONE;
 }
 
@@ -420,6 +439,9 @@ tc_out tc_step(tc_state *s, tc_event ev, int64_t now_ms) {
 
     if (ev.type == TC_EV_TICK) {
         if (s->armed >= 0 && now_ms >= s->hold_deadline_ms) fire(s, &o, s->armed);
+        /* The lone-modifier window closed with nothing decided: the game gets the
+           hold, live, and the session with it. Exclusive with an armed HOLD. */
+        if (s->lone_deadline_ms >= 0 && now_ms >= s->lone_deadline_ms) pass_through(s, &o);
     } else if (ev.type == TC_EV_KEY) {
         int m = modifier_of(s, ev);
         if (m >= 0) {
@@ -454,6 +476,7 @@ tc_out tc_step(tc_state *s, tc_event ev, int64_t now_ms) {
         }
     }
 
-    o.deadline_ms = earlier(s->hold_deadline_ms, s->panic_deadline_ms);
+    o.deadline_ms = earlier(earlier(s->hold_deadline_ms, s->lone_deadline_ms),
+                            s->panic_deadline_ms);
     return o;
 }

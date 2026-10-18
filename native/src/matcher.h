@@ -9,7 +9,9 @@
  * comparing the held modifiers and the swallowed buttons against the rules: a PRESS
  * rule fires on the down that completes it, a HOLD rule arms a deadline, a bare PRESS
  * fires on the modifier's release, and when no rule can match any more the whole
- * session is handed to the game (pass-through) so a modifier's normal job survives.
+ * session is handed to the game (pass-through) so a modifier's normal job survives —
+ * as it is when the modifiers are held alone past TC_LONE_MS with nothing armed, so
+ * a long press reaches the system as a long press and not as a tap on the release.
  * The invariant every decision serves: a down's fate decides its up's fate.
  *
  * Pure: no syscalls, no allocation, no time of its own. main.c feeds events and
@@ -50,6 +52,17 @@ enum {
    Deliberately NOT Home + Back 5s, which is another Thor app's panic combo — a
    user may have both installed. */
 #define TC_PANIC_MS 4000
+
+/* A session waiting on nothing but its modifiers — held, no button swallowed, no
+   rule armed — is handed to the game after this long: every held modifier's down
+   is synthesised and the session is the game's from then on. So a long AYN press
+   reaches AYN's own long-press (hide the bottom screen) and a long Start reaches
+   the game, instead of collapsing into a tap on the release; the price is that a
+   combo must be completed within this window of the last modifier down. Erring
+   long: a window too short loses combos AND hands the system a tap, a window too
+   long only delays the system's long-press by that much. Tunable; not a setting.
+   Design: docs/superpowers/specs/2026-10-18-m6-follow-ups-design.md §3. */
+#define TC_LONE_MS 500
 
 /* Bounds. A pass-through emits at most 5 modifier downs + TC_MAX_PRESSED button
    downs, plus the event itself and a tap's second half: 16 holds the worst case,
@@ -122,6 +135,8 @@ typedef struct {
     bool       passed;            /* the session was handed to the game */
     int        armed;             /* rule index with a pending HOLD deadline, or -1 */
     int64_t    hold_deadline_ms;  /* -1 = none */
+    int64_t    lone_deadline_ms;  /* TC_LONE_MS after the last modifier down with nothing
+                                     else to wait for; -1 = none */
 
     /* The panic combo, tracked from raw events whatever the table says. */
     bool    home_held;

@@ -787,9 +787,140 @@ static void test_panic_works_while_both_its_keys_are_modifiers(void) {
     CHECK(count_of(tc_step(&s, HOME_DOWN, 1000), TC_SWALLOW) == 1);
     tc_out armed = tc_step(&s, SELECT_DOWN, 1100);
     CHECK(count_of(armed, TC_SWALLOW) == 1);
-    CHECK(armed.deadline_ms == 1100 + TC_PANIC_MS);
+    /* The lone-modifier window is the sooner deadline: at its close both keys go to
+       the system, live — as they always did when they were NOT modifiers of the table
+       (test_panic_keys_still_reach_the_app) — and the panic, tracked from the raw
+       events, is untouched by that and fires on time. */
+    CHECK(armed.deadline_ms == 1100 + TC_LONE_MS);
+    tc_out handed = tc_step(&s, tick_event(), 1100 + TC_LONE_MS);
+    CHECK(handed.n == 2);
+    CHECK(is(handed.items[0], TC_SYNTH, TC_CODE_HOME, 1));
+    CHECK(is(handed.items[1], TC_SYNTH, TC_CODE_SELECT, 1));
+    CHECK(handed.deadline_ms == 1100 + TC_PANIC_MS);
     tc_out boom = tc_step(&s, tick_event(), 1100 + TC_PANIC_MS);
     CHECK(count_of(boom, TC_PANIC) == 1);
+}
+
+/* ---- a lone modifier reaches the system (M6, the follow-ups spec §3) ---- */
+
+static void test_a_lone_modifier_is_handed_through_after_the_window(void) {
+    tc_state s;
+    m1(&s);   /* HOLD 400 · AYN + X: AYN alone is a candidate's prefix, nothing armed */
+    tc_out d = tc_step(&s, AYN_DOWN, 1000);
+    CHECK(d.n == 1 && d.items[0].kind == TC_SWALLOW);
+    CHECK(d.deadline_ms == 1000 + TC_LONE_MS);
+    tc_out early = tc_step(&s, tick_event(), 1000 + TC_LONE_MS - 1);
+    CHECK(early.n == 0);
+    CHECK(early.deadline_ms == 1000 + TC_LONE_MS);
+    /* the window closes: the game gets AYN's down now, as a real hold */
+    tc_out o = tc_step(&s, tick_event(), 1000 + TC_LONE_MS);
+    CHECK(o.n == 1);
+    CHECK(is(o.items[0], TC_SYNTH, TC_CODE_AYN, 1));
+    CHECK(o.deadline_ms == -1);
+    CHECK(s.session && s.passed);
+    /* and the session is the game's: X is forwarded, nothing fires, the up is forwarded */
+    tc_out x = tc_step(&s, X_DOWN, 2000);
+    CHECK(x.n == 1 && is(x.items[0], TC_FORWARD, X_CODE, 1));
+    CHECK(x.deadline_ms == -1);
+    CHECK(is(tc_step(&s, X_UP, 2100).items[0], TC_FORWARD, X_CODE, 0));
+    tc_out u = tc_step(&s, AYN_UP, 2200);
+    CHECK(u.n == 1 && is(u.items[0], TC_FORWARD, TC_CODE_AYN, 0));
+    CHECK(!s.session);
+}
+
+static void test_a_button_inside_the_window_decides_the_session(void) {
+    tc_state s;
+    m1(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    /* at the last moment: the hold arms, the window is gone */
+    tc_out x = tc_step(&s, X_DOWN, 1000 + TC_LONE_MS - 1);
+    CHECK(x.n == 1 && x.items[0].kind == TC_SWALLOW);
+    CHECK(x.deadline_ms == 1000 + TC_LONE_MS - 1 + M1_HOLD_MS);
+    CHECK(count_of(tc_step(&s, tick_event(), 1000 + TC_LONE_MS), TC_SYNTH) == 0);
+    CHECK(fires(tc_step(&s, tick_event(), 1000 + TC_LONE_MS - 1 + M1_HOLD_MS), 1, 0));
+}
+
+static void test_a_bare_press_fires_under_the_window_and_not_past_it(void) {
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    int bare = rule(M_AYN, PRESS, 0, NULL, 0);
+    rule(M_AYN, HOLD, 400, b, 1);
+    tc_state s;
+    fresh(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    CHECK(fires(tc_step(&s, AYN_UP, 1000 + TC_LONE_MS - 1), 1, (uint16_t)bare));
+    /* held past the window: the system's, not the tap's */
+    tc_state s2;
+    fresh(&s2);
+    CHECK(tc_step(&s2, AYN_DOWN, 1000).deadline_ms == 1000 + TC_LONE_MS);
+    tc_out o = tc_step(&s2, tick_event(), 1000 + TC_LONE_MS);
+    CHECK(o.n == 1 && is(o.items[0], TC_SYNTH, TC_CODE_AYN, 1));
+    tc_out u = tc_step(&s2, AYN_UP, 2000);
+    CHECK(u.n == 1 && is(u.items[0], TC_FORWARD, TC_CODE_AYN, 0));
+    CHECK(count_of(u, TC_FIRE) == 0);
+    CHECK(count_of(u, TC_SYNTH) == 0);
+}
+
+static void test_a_bare_hold_leaves_no_window(void) {
+    /* the user bound the hold: the rule's deadline is the only one, however long */
+    table_begin(1);
+    rule(M_AYN, HOLD, TC_LONE_MS + 300, NULL, 0);
+    tc_state s;
+    fresh(&s);
+    CHECK(tc_step(&s, AYN_DOWN, 1000).deadline_ms == 1000 + TC_LONE_MS + 300);
+    tc_out at_window = tc_step(&s, tick_event(), 1000 + TC_LONE_MS);
+    CHECK(at_window.n == 0);
+    CHECK(at_window.deadline_ms == 1000 + TC_LONE_MS + 300);
+    CHECK(fires(tc_step(&s, tick_event(), 1000 + TC_LONE_MS + 300), 1, 0));
+    CHECK(count_of(tc_step(&s, AYN_UP, 2000), TC_SWALLOW) == 1);
+}
+
+static void test_a_second_modifier_restarts_the_window(void) {
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    rule(M_AYN | M_HOME, PRESS, 0, b, 1);
+    tc_state s;
+    fresh(&s);
+    CHECK(tc_step(&s, AYN_DOWN, 1000).deadline_ms == 1000 + TC_LONE_MS);
+    tc_out h = tc_step(&s, HOME_DOWN, 1400);
+    CHECK(h.n == 1 && h.items[0].kind == TC_SWALLOW);
+    CHECK(h.deadline_ms == 1400 + TC_LONE_MS);
+    CHECK(tc_step(&s, tick_event(), 1000 + TC_LONE_MS).n == 0);
+    CHECK(fires(tc_step(&s, X_DOWN, 1400 + TC_LONE_MS - 1), 1, 0));
+}
+
+static void test_a_modifier_held_after_a_fire_is_not_handed_through(void) {
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    rule(M_AYN, PRESS, 0, b, 1);
+    tc_state s;
+    fresh(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    CHECK(fires(tc_step(&s, X_DOWN, 1050), 1, 0));
+    tc_out xu = tc_step(&s, X_UP, 1100);
+    CHECK(count_of(xu, TC_SWALLOW) == 1);
+    CHECK(xu.deadline_ms == -1);              /* the system must never see this AYN */
+    CHECK(tc_step(&s, tick_event(), 5000).n == 0);
+    CHECK(count_of(tc_step(&s, AYN_UP, 5100), TC_SWALLOW) == 1);
+}
+
+static void test_modifiers_no_set_wants_are_handed_through_at_the_window(void) {
+    /* AYN and Home are both modifiers of the table, but no rule wants exactly the pair:
+       held together with no button they are still a session, and the game's at the window */
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    rule(M_AYN, PRESS, 0, b, 1);
+    rule(M_HOME, PRESS, 0, b, 1);
+    tc_state s;
+    fresh(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    tc_out h = tc_step(&s, HOME_DOWN, 1100);
+    CHECK(h.n == 1 && h.items[0].kind == TC_SWALLOW);
+    CHECK(h.deadline_ms == 1100 + TC_LONE_MS);
+    tc_out o = tc_step(&s, tick_event(), 1100 + TC_LONE_MS);
+    CHECK(o.n == 2);
+    CHECK(is(o.items[0], TC_SYNTH, TC_CODE_AYN, 1));
+    CHECK(is(o.items[1], TC_SYNTH, TC_CODE_HOME, 1));
 }
 
 static void test_releasing_the_modifier_with_a_button_swallowed_passes_through(void) {
@@ -948,6 +1079,13 @@ int main(void) {
     RUN(test_kitchen_sink_fixture_semantics);
     RUN(test_bootstrap_fixture_semantics);
     RUN(test_unbound_axis_is_forwarded);
+    RUN(test_a_lone_modifier_is_handed_through_after_the_window);
+    RUN(test_a_button_inside_the_window_decides_the_session);
+    RUN(test_a_bare_press_fires_under_the_window_and_not_past_it);
+    RUN(test_a_bare_hold_leaves_no_window);
+    RUN(test_a_second_modifier_restarts_the_window);
+    RUN(test_a_modifier_held_after_a_fire_is_not_handed_through);
+    RUN(test_modifiers_no_set_wants_are_handed_through_at_the_window);
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
