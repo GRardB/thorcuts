@@ -3,7 +3,6 @@ package com.grardb.thorcuts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 
 /**
@@ -48,7 +52,9 @@ import androidx.compose.ui.unit.dp
 fun PickerScreen(state: UiState, draft: EditorDraft, picking: Picking, vm: ThorcutsViewModel) {
     BackHandler(onBack = vm::closePicker)
     var query by rememberSaveable { mutableStateOf("") }
-    val installed = state.apps.mapTo(mutableSetOf()) { it.packageName }
+    // The derived lists are remembered on their inputs: tens of apps, recomposed on every
+    // keystroke of the search field.
+    val installed = remember(state.apps) { state.apps.mapTo(mutableSetOf()) { it.packageName } }
     val chosen: Set<String> = when (picking) {
         Picking.SCOPE_APPS -> draft.apps
         Picking.OPEN_APP -> setOfNotNull(draft.openApp)
@@ -57,8 +63,8 @@ fun PickerScreen(state: UiState, draft: EditorDraft, picking: Picking, vm: Thorc
         Picking.SCOPE_APPS -> vm::toggleApp
         Picking.OPEN_APP -> vm::chooseApp
     }
-    val extras = chosen.filter { it !in installed }.sorted()
-    val shown = filterApps(state.apps, query)
+    val extras = remember(chosen, installed) { chosen.filter { it !in installed }.sorted() }
+    val shown = remember(state.apps, query) { filterApps(state.apps, query) }
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenBar(
             title = when (picking) {
@@ -82,16 +88,21 @@ fun PickerScreen(state: UiState, draft: EditorDraft, picking: Picking, vm: Thorc
                 CircularProgressIndicator()
             }
         } else {
+            // One app to open: a radio group, so a screen reader says "2 of 14".
+            val group =
+                if (picking == Picking.OPEN_APP) Modifier.selectableGroup() else Modifier
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).then(group),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
-                items(extras) { pkg ->
+                items(extras, key = { it }) { pkg ->
                     AppRow(pkg, pkg, icon = null, chosen = pkg in chosen, picking) { onRow(pkg) }
                 }
                 items(shown, key = { it.packageName }) { app ->
                     val pkg = app.packageName
-                    AppRow(app.label, pkg, app.icon, chosen = pkg in chosen, picking) { onRow(pkg) }
+                    AppRow(app.label, pkg, app.icon, chosen = pkg in chosen, picking) {
+                        onRow(pkg)
+                    }
                 }
                 if (picking == Picking.SCOPE_APPS) {
                     item {
@@ -107,7 +118,9 @@ fun PickerScreen(state: UiState, draft: EditorDraft, picking: Picking, vm: Thorc
 }
 
 /** One app: its icon in a circle (a blank one when there is none), the label and the
- *  package, a checkbox (the scope's many) or a radio (the one to open); the whole row acts. */
+ *  package, a checkbox (the scope's many) or a radio (the one to open). The whole row is the
+ *  ONE tap target, with the control's role; the control itself has no click, so a screen
+ *  reader announces the row once. */
 @Composable
 private fun AppRow(
     label: String,
@@ -117,10 +130,16 @@ private fun AppRow(
     picking: Picking,
     onSelect: () -> Unit,
 ) {
+    val act = when (picking) {
+        Picking.SCOPE_APPS ->
+            Modifier.toggleable(value = chosen, role = Role.Checkbox) { onSelect() }
+        Picking.OPEN_APP ->
+            Modifier.selectable(selected = chosen, role = Role.RadioButton, onClick = onSelect)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
+            .then(act)
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -140,8 +159,8 @@ private fun AppRow(
             )
         }
         when (picking) {
-            Picking.SCOPE_APPS -> Checkbox(checked = chosen, onCheckedChange = { onSelect() })
-            Picking.OPEN_APP -> RadioButton(selected = chosen, onClick = onSelect)
+            Picking.SCOPE_APPS -> Checkbox(checked = chosen, onCheckedChange = null)
+            Picking.OPEN_APP -> RadioButton(selected = chosen, onClick = null)
         }
     }
 }

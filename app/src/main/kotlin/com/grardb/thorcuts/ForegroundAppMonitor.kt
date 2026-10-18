@@ -50,13 +50,13 @@ class ForegroundAppMonitor : AccessibilityService() {
         val windows = windowsOnAllDisplays.let { all ->
             (0 until all.size()).flatMap { all.valueAt(it) }
         }
-        // The window the controller's input reaches: the ACTIVE one. On the Thor each
-        // screen keeps its own focused window (MEASURED 2026-10-16: with an app on the
-        // bottom and Thorcuts on the top, both reported isFocused=true), so isFocused
-        // alone always picked the top screen; isActive is true for exactly the window on
-        // the top-focused display.
-        val focused = windows.firstOrNull { it.isActive } ?: windows.firstOrNull { it.isFocused }
-        val known = FocusedWindow.pick(windows.map { it.id }, focused?.id, packages)
+        // The window the controller's input reaches: FocusedWindow.choose says which (the
+        // active one, not merely a focused one — the Thor has one of those per screen).
+        val chosen = FocusedWindow.choose(
+            windows.map { FocusedWindow.Candidate(it.id, it.isActive, it.isFocused) }
+        )
+        val focused = windows.firstOrNull { it.id == chosen }
+        val known = FocusedWindow.pick(windows.map { it.id }, chosen, packages)
         // A window already up when the service connected has emitted no event yet: ask it
         // once (an IPC into that app), and remember the answer.
         val pkg = known ?: focused?.let { w ->

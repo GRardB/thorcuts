@@ -10,7 +10,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
 import com.grardb.thorcuts.core.config.ThorcutsConfig
-import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.ConflictDetector
@@ -73,6 +72,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
      *  stays at five flows. */
     private data class Local(
         val installed: List<InstalledApp> = emptyList(),
+        val appsResolved: Boolean = false,
         val loadingApps: Boolean = false,
         val writing: Boolean = false,
         val message: Message? = null,
@@ -102,7 +102,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         shortcuts = config.shortcuts,
         editor = d,
         recording = recording,
-        modifierNote = d?.takeIf { it.modifiers.any { m -> m in GAMEPLAY } }
+        modifierNote = d?.takeIf { it.modifiers.any { m -> m in ConflictDetector.GAMEPLAY } }
             ?.let { Copy.MODIFIER_NOTE },
         warning = d?.let { runCatching { it.trigger() }.getOrNull() }
             ?.let { ConflictDetector.warnings(it) }
@@ -240,15 +240,16 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
      * Resolve the installed-app list the first time it is needed — the editor opening (its
      * chosen apps show by icon and name) or the picker — off main, since each app's icon is
      * rendered to a bitmap on the way (tens of apps, a few hundred ms); `loadingApps` is set
-     * meanwhile and the picker shows a spinner. Resolved once per ViewModel.
+     * meanwhile and the picker shows a spinner. Resolved once per ViewModel, an empty result
+     * included (`appsResolved`), so a device with no launcher app is not asked on every open.
      */
     private fun ensureApps() {
-        if (local.value.installed.isNotEmpty() || local.value.loadingApps) return
+        if (local.value.appsResolved || local.value.loadingApps) return
         local.update { it.copy(loadingApps = true) }
         viewModelScope.launch {
             try {
                 val apps = withContext(Dispatchers.IO) { resolveInstalled() }
-                local.update { it.copy(installed = apps) }
+                local.update { it.copy(installed = apps, appsResolved = true) }
             } finally {
                 local.update { it.copy(loadingApps = false) }
             }
@@ -411,7 +412,6 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** Kept from the diagnostics ViewModel: the device runs filter on this tag. */
         const val TAG = "ThorcutsDiag"
-        val GAMEPLAY = setOf(ModifierKey.START, ModifierKey.SELECT)
         /** The import's cap: a 64-rule config is tens of KB; a megabyte is a mis-pick. */
         const val MAX_IMPORT_BYTES = 1 shl 20
     }

@@ -3,32 +3,30 @@ package com.grardb.thorcuts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,7 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -118,8 +116,10 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             state.modifierNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
             SectionLabel("Style")
-            ChoiceRow("Tap", selected = !draft.timer) { vm.setTimer(false) }
-            ChoiceRow("Timer", selected = draft.timer) { vm.setTimer(true) }
+            ChoiceGroup {
+                ChoiceRow("Tap", selected = !draft.timer) { vm.setTimer(false) }
+                ChoiceRow("Timer", selected = draft.timer) { vm.setTimer(true) }
+            }
             if (draft.timer) {
                 OutlinedTextField(
                     value = draft.holdMs,
@@ -137,59 +137,65 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             // the way the list reads it ("Open Dolphin on the bottom screen").
             val installed = state.apps.associateBy { it.packageName }
             SectionLabel("Action")
-            for (kind in ActionKind.entries) {
-                ChoiceRow(kind.choiceLabel, selected = draft.action == kind) {
-                    vm.setAction(kind)
-                }
-                if (draft.action == kind && kind == ActionKind.OPEN) {
-                    Column(
-                        modifier = Modifier.padding(start = NESTED),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        val pkg = draft.openApp
-                        if (pkg == null) {
-                            Text(Copy.NO_APP, style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            ChosenApp(installed[pkg], pkg)
-                        }
-                        FilledTonalButton(
-                            onClick = vm::openAppPicker,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Choose app…") }
+            ChoiceGroup {
+                for (kind in ActionKind.entries) {
+                    ChoiceRow(kind.choiceLabel, selected = draft.action == kind) {
+                        vm.setAction(kind)
                     }
-                }
-                if (draft.action == kind && kind.takesScreen) {
-                    for (target in ScreenTarget.entries) {
-                        ChoiceRow(
-                            target.choiceLabel(),
-                            selected = draft.screen == target,
-                            nested = true,
-                        ) { vm.setScreen(target) }
+                    if (draft.action == kind && kind == ActionKind.OPEN) {
+                        Column(
+                            modifier = Modifier.padding(start = NESTED),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            val pkg = draft.openApp
+                            if (pkg == null) {
+                                Text(Copy.NO_APP, style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                ChosenApp(installed[pkg], pkg)
+                            }
+                            FilledTonalButton(
+                                onClick = vm::openAppPicker,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Choose app…") }
+                        }
+                    }
+                    if (draft.action == kind && kind.takesScreen) {
+                        ChoiceGroup {
+                            for (target in ScreenTarget.entries) {
+                                ChoiceRow(
+                                    target.choiceLabel(),
+                                    selected = draft.screen == target,
+                                    nested = true,
+                                ) { vm.setScreen(target) }
+                            }
+                        }
                     }
                 }
             }
 
             // Likewise the chosen apps, by icon and name, under the scope they belong to.
             SectionLabel("Where")
-            for (kind in ScopeKind.entries) {
-                ChoiceRow(kind.label, selected = draft.scope == kind) { vm.setScope(kind) }
-                if (draft.scope == kind && kind != ScopeKind.EVERYWHERE) {
-                    Column(
-                        modifier = Modifier.padding(start = NESTED),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (draft.apps.isEmpty()) {
-                            Text(Copy.NO_APPS, style = MaterialTheme.typography.bodySmall)
+            ChoiceGroup {
+                for (kind in ScopeKind.entries) {
+                    ChoiceRow(kind.label, selected = draft.scope == kind) { vm.setScope(kind) }
+                    if (draft.scope == kind && kind != ScopeKind.EVERYWHERE) {
+                        Column(
+                            modifier = Modifier.padding(start = NESTED),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (draft.apps.isEmpty()) {
+                                Text(Copy.NO_APPS, style = MaterialTheme.typography.bodySmall)
+                            }
+                            val byName =
+                                draft.apps.sortedBy { installed[it]?.label?.lowercase() ?: it }
+                            for (pkg in byName) ChosenApp(installed[pkg], pkg)
+                            FilledTonalButton(
+                                onClick = vm::openPicker,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Choose apps…") }
                         }
-                        val byName =
-                            draft.apps.sortedBy { installed[it]?.label?.lowercase() ?: it }
-                        for (pkg in byName) ChosenApp(installed[pkg], pkg)
-                        FilledTonalButton(
-                            onClick = vm::openPicker,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Choose apps…") }
                     }
                 }
             }
@@ -252,21 +258,6 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
     }
 }
 
-/** The editor's and the picker's top bar: a back arrow and the title. `TopAppBar` is still
- *  experimental in material3 1.4; the opt-in is confined to this one composable. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ScreenBar(title: String, onBack: () -> Unit) {
-    TopAppBar(
-        title = { Text(title) },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_glyph_back), contentDescription = "Back")
-            }
-        },
-    )
-}
-
 /** A section's heading: the accent colour, a rule above it so the sections read apart. */
 @Composable
 private fun SectionLabel(text: String) {
@@ -278,8 +269,20 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/** One choice of a few: a radio and its label, the whole row tappable; [nested] indents it
- *  under the choice above. */
+/** A group of [ChoiceRow]s, one of them selected: the semantics a screen reader needs to say
+ *  "2 of 3", and the rows spaced as the editor's column spaces everything else. */
+@Composable
+private fun ChoiceGroup(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier.selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
+}
+
+/** One choice of a few: a radio and its label, the whole row ONE tap target with the radio's
+ *  role (the radio itself has no click, so a screen reader announces the row once); [nested]
+ *  indents it under the choice above. */
 @Composable
 private fun ChoiceRow(
     label: String,
@@ -288,15 +291,15 @@ private fun ChoiceRow(
     onSelect: () -> Unit,
 ) {
     Row(
-        // The indent comes BEFORE the clickable, so a nested row's tap target and ripple start
-        // at the indent too (the final review).
+        // The indent comes BEFORE the selectable, so a nested row's tap target and ripple
+        // start at the indent too (the editor polish's final review).
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = if (nested) NESTED else 0.dp)
-            .clickable(onClick = onSelect),
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onSelect)
+        RadioButton(selected = selected, onClick = null)
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
