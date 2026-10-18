@@ -9,7 +9,9 @@ import androidx.activity.viewModels
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: ThorcutsViewModel by viewModels()
+    private val viewModel: ThorcutsViewModel by viewModels {
+        ThorcutsViewModel.factory(application)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Transparent system bars with the right icon contrast for the system's light or dark

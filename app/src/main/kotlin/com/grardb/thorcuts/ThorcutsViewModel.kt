@@ -1,13 +1,18 @@
 package com.grardb.thorcuts
 
 import android.app.Application
+import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.model.ScreenTarget
@@ -15,6 +20,9 @@ import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.ConflictDetector
 import com.grardb.thorcuts.platform.coordinator.CoordinatorState
 import com.grardb.thorcuts.platform.coordinator.ImportOutcome
+import com.grardb.thorcuts.platform.coordinator.ThorcutsCoordinator
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +35,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import kotlin.math.roundToInt
 
 /** A recording left open — the game on the other screen, a dead pad — ends itself. */
@@ -34,6 +44,16 @@ private const val RECORDING_TIMEOUT_MS = 20_000L
 
 /** The picker's icon size; each icon is rendered once at this size, in pixels, and kept. */
 private const val ICON_DP = 40
+
+/** The files the system picker returns, behind a seam: the content resolver on the device;
+ *  a host test never reaches it (it drives [ThorcutsViewModel.importStream] directly). */
+interface PickedFiles {
+    /** The picked file for reading, or null when it cannot be opened. */
+    fun read(uri: Uri): InputStream?
+
+    /** The picked file for writing, truncated, or null when it cannot be opened. */
+    fun write(uri: Uri): OutputStream?
+}
 
 /**
  * A view of the holder, plus the one piece of state that is the screen's own: the editor's
@@ -50,20 +70,20 @@ private const val ICON_DP = 40
  * Import and export are the coordinator's too ([exportFile], [importFile]): this ViewModel only
  * opens the file the picker returned and does that I/O off main. What those report, and a
  * refused row toggle, is posted as a [Message] for the shell's snackbar (the UI polish).
+ * Its collaborators arrive by constructor — [factory] builds the real ones from the process —
+ * so a host test drives it over the real coordinator with :platform's fakes.
  */
-class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val coordinator = ThorcutsApp.of(app).coordinator
-
-    private val pm = app.packageManager
-
-    private val resolver = app.contentResolver
-
-    /** Pixels per dp on this device, for the picker's icons. */
-    private val density = app.resources.displayMetrics.density
-
+class ThorcutsViewModel(
+    private val coordinator: ThorcutsCoordinator,
     /** Process-lifetime and on main: a write outlives this ViewModel. See [ThorcutsApp.writes]. */
-    private val writes = ThorcutsApp.of(app).writes
+    private val writes: CoroutineScope,
+    /** The files the system picker returns. */
+    private val files: PickedFiles,
+    /** Every launcher app with its icon, resolved off main — [launcherApps] on the device. */
+    private val installedApps: () -> List<InstalledApp>,
+    /** Where the file I/O and the app resolution run; a test passes Unconfined. */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
 
     private val draft = MutableStateFlow<EditorDraft?>(null)
 
@@ -248,7 +268,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(loadingApps = true) }
         viewModelScope.launch {
             try {
-                val apps = withContext(Dispatchers.IO) { resolveInstalled() }
+                val apps = withContext(io) { installedApps() }
                 local.update { it.copy(installed = apps, appsResolved = true) }
             } finally {
                 local.update { it.copy(loadingApps = false) }
@@ -257,21 +277,6 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closePicker() = change { it.copy(picker = null) }
-
-    /** Every launcher app, one per package, by label; its icon at [ICON_DP] or null when the
-     *  icon cannot be loaded (a broken package's resources — the row shows a blank circle). */
-    private fun resolveInstalled(): List<InstalledApp> {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val px = (ICON_DP * density).roundToInt()
-        @Suppress("DEPRECATION")
-        return pm.queryIntentActivities(intent, 0)
-            .associateBy { it.activityInfo.packageName }
-            .map { (packageName, info) ->
-                val icon = runCatching { info.loadIcon(pm).toBitmap(px, px).asImageBitmap() }
-                InstalledApp(packageName, info.loadLabel(pm).toString(), icon.getOrNull())
-            }
-            .sortedBy { it.label.lowercase() }
-    }
 
     fun setId(id: String) = change { it.copy(id = id) }
     fun setTimer(timer: Boolean) = change { it.copy(timer = timer) }
@@ -347,36 +352,39 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Export to the file the Save-As picker returned: the write on IO, the outcome on the
-     * config line (the coordinator's). `wt`, so an existing file picked for overwriting is
-     * truncated — on some providers `w` alone leaves the tail of a longer old text.
-     */
-    fun exportFile(uri: Uri) {
+    /** Export to the file the Save-As picker returned: the write on [io], the outcome on
+     *  the config line (the coordinator's). */
+    fun exportFile(uri: Uri) = exportStream {
+        files.write(uri) ?: throw IOException("could not open the file")
+    }
+
+    /** The export over an opened stream — the seam under [exportFile]. [open] runs on [io]
+     *  inside the coordinator's try, so whatever it throws becomes the config line. */
+    internal fun exportStream(open: () -> OutputStream) {
         writes.launch {
-            val outcome = withContext(Dispatchers.IO) {
+            val outcome = withContext(io) {
                 coordinator.exportTo { text ->
-                    val out = resolver.openOutputStream(uri, "wt")
-                        ?: throw IOException("could not open the file")
-                    out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                    open().use { it.write(text.toByteArray(Charsets.UTF_8)) }
                 }
             }
             post(outcome)
         }
     }
 
-    /**
-     * Import the file the picker returned, as a merge that never replaces (parent §10): the
-     * read on IO and bounded ([ImportReader] — a mis-pick cannot load gigabytes), the merge
-     * and its report the coordinator's.
-     */
-    fun importFile(uri: Uri) {
+    /** Import the file the picker returned, as a merge that never replaces (parent §10): the
+     *  read on [io] and bounded ([ImportReader] — a mis-pick cannot load gigabytes), the
+     *  merge and its report the coordinator's. */
+    fun importFile(uri: Uri) = importStream {
+        files.read(uri) ?: throw IOException("could not open the file")
+    }
+
+    /** The import over an opened stream — the seam under [importFile], and the host test's
+     *  way in. [open] runs on [io] inside the coordinator's try. */
+    internal fun importStream(open: () -> InputStream) {
         writes.launch {
-            val outcome = withContext(Dispatchers.IO) {
+            val outcome = withContext(io) {
                 coordinator.importFrom {
-                    val input = resolver.openInputStream(uri)
-                        ?: throw IOException("could not open the file")
-                    input.use { ImportReader.read(it, MAX_IMPORT_BYTES) }
+                    open().use { ImportReader.read(it, MAX_IMPORT_BYTES) }
                 }
             }
             // A merge that ran is a report (a dialog); a failure is one line (a snackbar).
@@ -409,10 +417,48 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         is UpdateOutcome.Rejected -> "rejected: $reason"
     }
 
-    private companion object {
+    companion object {
         /** Kept from the diagnostics ViewModel: the device runs filter on this tag. */
-        const val TAG = "ThorcutsDiag"
+        private const val TAG = "ThorcutsDiag"
         /** The import's cap: a 64-rule config is tens of KB; a megabyte is a mis-pick. */
-        const val MAX_IMPORT_BYTES = 1 shl 20
+        private const val MAX_IMPORT_BYTES = 1 shl 20
+
+        /** The real collaborators, from the process: [ThorcutsApp]'s coordinator and write
+         *  scope, the content resolver, the package manager at the display's density. */
+        fun factory(app: Application): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val process = ThorcutsApp.of(app)
+                val density = app.resources.displayMetrics.density
+                ThorcutsViewModel(
+                    coordinator = process.coordinator,
+                    writes = process.writes,
+                    files = ResolverFiles(app.contentResolver),
+                    installedApps = { launcherApps(app.packageManager, density) },
+                )
+            }
+        }
     }
+}
+
+/** The content resolver as [PickedFiles]. `wt` on the write, so an existing file picked for
+ *  overwriting is truncated: on some providers `w` alone keeps the tail of a longer text. */
+private class ResolverFiles(private val resolver: ContentResolver) : PickedFiles {
+    override fun read(uri: Uri): InputStream? = resolver.openInputStream(uri)
+    override fun write(uri: Uri): OutputStream? = resolver.openOutputStream(uri, "wt")
+}
+
+/** Every launcher app, one per package, by label; its icon at [ICON_DP] or null when the icon
+ *  cannot be loaded (a broken package's resources — the row shows a blank circle). [density]
+ *  is pixels per dp on this device. Called off main: each icon is rendered to a bitmap. */
+private fun launcherApps(pm: PackageManager, density: Float): List<InstalledApp> {
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    val px = (ICON_DP * density).roundToInt()
+    @Suppress("DEPRECATION")
+    return pm.queryIntentActivities(intent, 0)
+        .associateBy { it.activityInfo.packageName }
+        .map { (packageName, info) ->
+            val icon = runCatching { info.loadIcon(pm).toBitmap(px, px).asImageBitmap() }
+            InstalledApp(packageName, info.loadLabel(pm).toString(), icon.getOrNull())
+        }
+        .sortedBy { it.label.lowercase() }
 }

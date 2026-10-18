@@ -54,8 +54,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // Host tests for the app's pure logic (FocusedWindow, EditorDraft): a plain JVM, JUnit 5
-    // as in :core and :platform. The classes under test import nothing from android.*.
+    // Host tests for the app's pure logic (FocusedWindow, EditorDraft) and for the ViewModel
+    // over :platform's fakes: a plain JVM, JUnit 5 as in :core and :platform. Nothing under
+    // test calls into android.* (an android.net.Uri is only ever a parameter type).
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
     }
@@ -80,6 +81,11 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
+    // The ViewModel test builds the real coordinator from :platform's fakes and :core's
+    // fixtures, with Main swapped for a test dispatcher (kotlinx-coroutines-test).
+    testImplementation(testFixtures(project(":core")))
+    testImplementation(testFixtures(project(":platform")))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.20")
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
