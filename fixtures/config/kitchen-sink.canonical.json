@@ -114,7 +114,8 @@
         "style": "PRESS"
       },
       "action": {
-        "kind": "OpenThorcuts",
+        "kind": "OpenApp",
+        "package": "com.grardb.thorcuts",
         "screen": "BOTTOM"
       },
       "scope": {

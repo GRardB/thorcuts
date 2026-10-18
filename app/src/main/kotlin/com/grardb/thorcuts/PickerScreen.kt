@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,20 +37,36 @@ import androidx.compose.ui.unit.dp
 
 /**
  * The app picker: a search field, then every installed launcher app by label with its icon
- * and a checkbox — and first any package the draft already names that is not installed
- * (shown by package, no icon, so it can be unchecked; not filtered). Done, or Back, returns
- * to the editor. The list and its icons are resolved once, off main, the first time the
- * picker opens; a spinner stands in until they land.
+ * — and first any package the draft already names that is not installed (shown by package,
+ * no icon, so it can be seen and unchosen; not filtered). Two uses, told apart by [picking]:
+ * the scope's apps, each row a checkbox and Done (or Back) returning to the editor; or the
+ * one app an "Open an app" shortcut opens, each row a radio, a tap choosing it and returning
+ * at once. The list and its icons are resolved once, off main, the first time the picker
+ * opens; a spinner stands in until they land.
  */
 @Composable
-fun PickerScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
+fun PickerScreen(state: UiState, draft: EditorDraft, picking: Picking, vm: ThorcutsViewModel) {
     BackHandler(onBack = vm::closePicker)
     var query by rememberSaveable { mutableStateOf("") }
     val installed = state.apps.mapTo(mutableSetOf()) { it.packageName }
-    val extras = draft.apps.filter { it !in installed }.sorted()
+    val chosen: Set<String> = when (picking) {
+        Picking.SCOPE_APPS -> draft.apps
+        Picking.OPEN_APP -> setOfNotNull(draft.openApp)
+    }
+    val onRow: (String) -> Unit = when (picking) {
+        Picking.SCOPE_APPS -> vm::toggleApp
+        Picking.OPEN_APP -> vm::chooseApp
+    }
+    val extras = chosen.filter { it !in installed }.sorted()
     val shown = filterApps(state.apps, query)
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenBar(title = "Choose apps", onBack = vm::closePicker)
+        ScreenBar(
+            title = when (picking) {
+                Picking.SCOPE_APPS -> "Choose apps"
+                Picking.OPEN_APP -> "Choose an app"
+            },
+            onBack = vm::closePicker,
+        )
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -70,20 +87,19 @@ fun PickerScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
                 items(extras) { pkg ->
-                    AppRow(pkg, pkg, icon = null, checked = pkg in draft.apps) {
-                        vm.toggleApp(pkg)
-                    }
+                    AppRow(pkg, pkg, icon = null, chosen = pkg in chosen, picking) { onRow(pkg) }
                 }
                 items(shown, key = { it.packageName }) { app ->
-                    AppRow(app.label, app.packageName, app.icon, app.packageName in draft.apps) {
-                        vm.toggleApp(app.packageName)
-                    }
+                    val pkg = app.packageName
+                    AppRow(app.label, pkg, app.icon, chosen = pkg in chosen, picking) { onRow(pkg) }
                 }
-                item {
-                    PrimaryButton(
-                        onClick = vm::closePicker,
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    ) { Text("Done") }
+                if (picking == Picking.SCOPE_APPS) {
+                    item {
+                        PrimaryButton(
+                            onClick = vm::closePicker,
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        ) { Text("Done") }
+                    }
                 }
             }
         }
@@ -91,19 +107,20 @@ fun PickerScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
 }
 
 /** One app: its icon in a circle (a blank one when there is none), the label and the
- *  package, a checkbox; the whole row toggles it. */
+ *  package, a checkbox (the scope's many) or a radio (the one to open); the whole row acts. */
 @Composable
 private fun AppRow(
     label: String,
     pkg: String,
     icon: ImageBitmap?,
-    checked: Boolean,
-    onToggle: () -> Unit,
+    chosen: Boolean,
+    picking: Picking,
+    onSelect: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .clickable(onClick = onSelect)
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -122,6 +139,9 @@ private fun AppRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Checkbox(checked = checked, onCheckedChange = { onToggle() })
+        when (picking) {
+            Picking.SCOPE_APPS -> Checkbox(checked = chosen, onCheckedChange = { onSelect() })
+            Picking.OPEN_APP -> RadioButton(selected = chosen, onClick = onSelect)
+        }
     }
 }

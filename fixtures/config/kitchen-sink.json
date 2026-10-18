@@ -41,7 +41,7 @@
     {
       "id": "open-bottom",
       "trigger": { "modifiers": ["SELECT"], "style": "PRESS" },
-      "action": { "kind": "OpenThorcuts", "screen": "BOTTOM" },
+      "action": { "screen": "BOTTOM", "package": "com.grardb.thorcuts", "kind": "OpenApp" },
       "enabled": true,
       "scope": { "kind": "Global" }
     },

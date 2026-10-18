@@ -1,7 +1,6 @@
 package com.grardb.thorcuts
 
 import android.app.Application
-import android.content.ComponentName
 import android.content.Context
 import com.grardb.thorcuts.platform.config.AndroidConfigFile
 import com.grardb.thorcuts.platform.config.PrefsEnabledSwitch
@@ -49,10 +48,13 @@ class ThorcutsApp : Application() {
             switch = PrefsEnabledSwitch(this),
             // Hold = the foreground service exists; release = it is gone.
             keeper = { on -> if (on) HelperService.start(this) else HelperService.stop(this) },
-            // Our own Activity as `am start -n` takes it: what OpenThorcuts launches.
-            thorcutsMain = ComponentName(this, MainActivity::class.java).flattenToShortString(),
             // The launchers, resolved on every close so a launcher change is honoured.
             homePackages = { HomePackages.resolve(packageManager) },
+            // A package's launch activity as `am start -n` takes it (`org.x/.Main`), resolved
+            // on every open; null for one with no launcher activity, or not installed.
+            launchComponent = { pkg ->
+                packageManager.getLaunchIntentForPackage(pkg)?.component?.flattenToShortString()
+            },
             log = AndroidLogger("ThorcutsCoord"),
         )
     }

@@ -21,6 +21,8 @@ class PieceSpecTest {
 
     @Test
     fun `the five modifiers, as a modifier and as the control it is`() {
+        // AYN carries a word, so it stays a rectangle; the four glyphs are circles, like the
+        // buttons they are on the Thor
         assertEquals(rect("AYN"), pieceOf(ModifierKey.AYN))
         val glyphs = mapOf(
             ModifierKey.HOME to ("Home" to Glyph.HOME),
@@ -30,7 +32,7 @@ class PieceSpecTest {
         )
         for ((m, expected) in glyphs) {
             val (name, glyph) = expected
-            val expectedSpec = PieceSpec(name, PieceShape.RECT, PieceFill.GRAY, glyph = glyph)
+            val expectedSpec = PieceSpec(name, PieceShape.CIRCLE, PieceFill.GRAY, glyph = glyph)
             assertEquals(expectedSpec, pieceOf(m))
             assertEquals(pieceOf(m), pieceOf(m.control))      // the control form maps the same
         }
@@ -55,9 +57,9 @@ class PieceSpecTest {
     }
 
     @Test
-    fun `the D-pad is a gray circle with an arrow`() {
+    fun `the D-pad is a gray rectangle with an arrow`() {
         fun arrow(name: String, glyph: Glyph) =
-            PieceSpec(name, PieceShape.CIRCLE, PieceFill.GRAY, glyph = glyph)
+            PieceSpec(name, PieceShape.RECT, PieceFill.GRAY, glyph = glyph)
         assertEquals(arrow("D-pad up", Glyph.UP), pieceOf(hat(ThorControls.HAT0Y, -1)))
         assertEquals(arrow("D-pad down", Glyph.DOWN), pieceOf(hat(ThorControls.HAT0Y, 1)))
         assertEquals(arrow("D-pad left", Glyph.LEFT), pieceOf(hat(ThorControls.HAT0X, -1)))

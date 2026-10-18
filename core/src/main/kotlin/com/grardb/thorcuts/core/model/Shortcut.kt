@@ -1,5 +1,7 @@
 package com.grardb.thorcuts.core.model
 
+import com.grardb.thorcuts.core.safety.CommandSafety
+
 /** How a trigger completes. [wire] is the rule table's style byte. */
 enum class TriggerStyle(val wire: Int) { PRESS(0), HOLD(1) }
 
@@ -48,15 +50,26 @@ data class Trigger(
 enum class ScreenTarget { TOP, BOTTOM, FOCUSED }
 
 /**
- * Parent spec §9's six v1 actions, as data only. Nothing in :core dispatches them;
- * the app resolves a fired rule back to its Shortcut and acts from there.
+ * Parent spec §9's actions, as data only. Nothing in :core dispatches them; the app
+ * resolves a fired rule back to its Shortcut and acts from there. [OpenApp] generalises
+ * what was `OpenThorcuts(screen)` (the follow-ups spec, 2026-10-18): any installed app,
+ * by package, on a screen.
  */
 sealed interface Action {
     data object SwapScreens : Action
     data object MoveFocusedToOtherScreen : Action
     data class CloseScreen(val screen: ScreenTarget) : Action
     data class GoHome(val screen: ScreenTarget) : Action
-    data class OpenThorcuts(val screen: ScreenTarget) : Action
+
+    /** Open [packageName]'s launch activity on [screen]. The name is validated here because
+     *  it reaches a root shell (`am start`); the codec's drop reason is this message. */
+    data class OpenApp(val packageName: String, val screen: ScreenTarget) : Action {
+        init {
+            require(CommandSafety.isPackage(packageName)) {
+                "The app must be named by its package name (got '$packageName')"
+            }
+        }
+    }
 }
 
 /** Where a shortcut applies (parent spec §10). */

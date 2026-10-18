@@ -91,7 +91,7 @@ fun ThorcutsScreen(vm: ThorcutsViewModel) {
                                 }
                             }
                         }
-                        editor.picker -> PickerScreen(state, editor, vm)
+                        editor.picker != null -> PickerScreen(state, editor, editor.picker, vm)
                         else -> EditorScreen(state, editor, vm)
                     }
                 }

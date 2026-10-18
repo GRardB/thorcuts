@@ -260,7 +260,7 @@ object TaskTool {
      * Which display holds input focus, and what is focused there. Unlike every other id
      * this tool prints, task= and pkg= name the focused ROOT task itself — which may be the
      * home stack or a picture-in-picture window, not an app — so the app side reads
-     * display= only (TaskActions.openThorcuts) and chooses the app through [isApp] like
+     * display= only (TaskActions.openApp) and chooses the app through [isApp] like
      * everything else.
      */
     private fun focused(atm: Any) {

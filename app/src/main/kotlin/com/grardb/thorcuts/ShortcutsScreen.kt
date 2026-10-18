@@ -33,6 +33,9 @@ import com.grardb.thorcuts.core.model.Shortcut
 
 private const val TITLE = "Thorcuts enabled"
 private const val ADD = "Add shortcut"
+/** The Add button's label while the switch is off: a trigger is recorded through the helper,
+ *  which runs exactly while the switch is on, so an Add could only dead-end at Record. */
+private const val ADD_OFF = "Turn on to add a shortcut"
 private const val EMPTY = "No shortcuts yet"
 private const val NEEDS_MONITOR = "Per-app shortcuts need the accessibility service."
 private const val TURN_ON = "Turn on"
@@ -86,7 +89,13 @@ fun ShortcutsScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyListSt
             )
         }
         item {
-            PrimaryButton(onClick = vm::add, modifier = Modifier.fillMaxWidth()) { Text(ADD) }
+            // Disabled while the switch is off (the rows stay tappable: a rename, a change of
+            // action or a delete needs no helper).
+            PrimaryButton(
+                onClick = vm::add,
+                enabled = state.enabled,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (state.enabled) ADD else ADD_OFF) }
         }
     }
 }
@@ -177,8 +186,9 @@ private fun ShortcutList(
     }
 }
 
-/** One shortcut: its id, its combo as pieces, its action and scope (the apps by name) on one
- *  line; the switch is its enabled flag. The row opens the editor. */
+/** One shortcut: its id, its combo as pieces, its action (the app by name when it opens one)
+ *  and scope (the apps by name) on one line; the switch is its enabled flag. The row opens
+ *  the editor. */
 @Composable
 private fun ShortcutRow(
     shortcut: Shortcut,
@@ -200,7 +210,7 @@ private fun ShortcutRow(
             Text(shortcut.id, style = MaterialTheme.typography.bodyLarge)
             Combo(shortcut.trigger)
             Text(
-                listOfNotNull(shortcut.action.label(), shortcut.scope.line(labels))
+                listOfNotNull(shortcut.action.label(labels), shortcut.scope.line(labels))
                     .joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

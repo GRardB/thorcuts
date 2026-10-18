@@ -220,11 +220,21 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(apps = apps)
     }
 
-    /** Open the picker at once; the app list is resolved if it was not already. */
+    /** Open the picker for the scope's apps at once; the app list is resolved if it was not
+     *  already. */
     fun openPicker() {
-        change { it.copy(picker = true) }
+        change { it.copy(picker = Picking.SCOPE_APPS) }
         ensureApps()
     }
+
+    /** Open the picker for the one app an "Open an app" shortcut opens. */
+    fun openAppPicker() {
+        change { it.copy(picker = Picking.OPEN_APP) }
+        ensureApps()
+    }
+
+    /** The picker's choice for "Open an app": the package, and the picker closes. */
+    fun chooseApp(packageName: String) = change { it.copy(openApp = packageName, picker = null) }
 
     /**
      * Resolve the installed-app list the first time it is needed — the editor opening (its
@@ -245,7 +255,7 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun closePicker() = change { it.copy(picker = false) }
+    fun closePicker() = change { it.copy(picker = null) }
 
     /** Every launcher app, one per package, by label; its icon at [ICON_DP] or null when the
      *  icon cannot be loaded (a broken package's resources — the row shows a blank circle). */
@@ -289,7 +299,8 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         coordinator.stopRecording()
     }
 
-    /** Disabled (not merely ignored) while a write is in flight (E7-2). */
+    /** Disabled (not merely ignored) while a write is in flight (E7-2). An edit replaces the
+     *  shortcut it opened, by its old name — a rename keeps the row's place. */
     fun save() {
         val d = draft.value ?: return
         if (local.value.writing) return
@@ -298,12 +309,18 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         stopRecording()
         writes.launch {
             try {
+                val original = d.original
                 val outcome = coordinator.update { config ->
                     val s = d.toShortcut()
-                    if (d.original == null) config.added(s) else config.replaced(s)
+                    if (original == null) config.added(s) else config.replaced(s, original.id)
                 }
-                val verb = if (d.original == null) "added" else "replaced"
-                Log.i(TAG, "EDIT $verb ${d.id.trim()} -> ${outcome.text()}")
+                val id = d.id.trim()
+                val verb = when {
+                    original == null -> "added"
+                    original.id != id -> "replaced (was ${original.id})"
+                    else -> "replaced"
+                }
+                Log.i(TAG, "EDIT $verb $id -> ${outcome.text()}")
                 finish(outcome, session)
             } finally {
                 local.update { it.copy(writing = false) }

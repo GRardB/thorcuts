@@ -17,24 +17,28 @@ enum class ScopeKind(val label: String) {
     ONLY("Only in…");
 }
 
-/** The five kinds of action the editor offers; three of them aim at a screen. */
+/** The five kinds of action the editor offers; three of them aim at a screen, and one of
+ *  those opens an app chosen in the picker. */
 enum class ActionKind(val label: String, val takesScreen: Boolean) {
     SWAP("Swap the screens", false),
     MOVE("Move the focused app to the other screen", false),
     CLOSE("Close the app on", true),
     HOME("Go home on", true),
-    OPEN("Open Thorcuts on", true);
+    OPEN("Open an app", true);
 
     /** The editor's radio: an action that aims at a screen trails an ellipsis, since its
-     *  screen is the nested choice beneath it; the list's [Action.label] completes it. */
+     *  screen (and its app) is the nested choice beneath it; the list's [Action.label]
+     *  completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
 
-    fun action(screen: ScreenTarget): Action = when (this) {
+    /** The action, from the nested choices: [screen] for the three that aim at one, [app]
+     *  (a package) for [OPEN] — refused with `Choose an app` when there is none. */
+    fun action(screen: ScreenTarget, app: String?): Action = when (this) {
         SWAP -> Action.SwapScreens
         MOVE -> Action.MoveFocusedToOtherScreen
         CLOSE -> Action.CloseScreen(screen)
         HOME -> Action.GoHome(screen)
-        OPEN -> Action.OpenThorcuts(screen)
+        OPEN -> Action.OpenApp(app ?: throw IllegalArgumentException(Copy.CHOOSE_APP), screen)
     }
 
     companion object {
@@ -43,17 +47,23 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
             Action.MoveFocusedToOtherScreen -> MOVE
             is Action.CloseScreen -> CLOSE
             is Action.GoHome -> HOME
-            is Action.OpenThorcuts -> OPEN
+            is Action.OpenApp -> OPEN
         }
 
         fun screenOf(action: Action): ScreenTarget? = when (action) {
             is Action.CloseScreen -> action.screen
             is Action.GoHome -> action.screen
-            is Action.OpenThorcuts -> action.screen
+            is Action.OpenApp -> action.screen
             else -> null
         }
+
+        fun appOf(action: Action): String? = (action as? Action.OpenApp)?.packageName
     }
 }
+
+/** Which list the picker is choosing for: the scope's apps (many, with a Done), or the one
+ *  app an [ActionKind.OPEN] opens (a tap chooses and returns). */
+enum class Picking { SCOPE_APPS, OPEN_APP }
 
 /** The screen an action aims at, as the list names it. */
 fun ScreenTarget.label(): String = when (this) {
@@ -70,11 +80,14 @@ fun ScreenTarget.choiceLabel(): String = when (this) {
     ScreenTarget.FOCUSED -> FOCUSED_EXPLAINED
 }
 
-/** An action as the list names it: "Close the app on the focused screen". */
-fun Action.label(): String {
+/** An action as the list names it: "Close the app on the focused screen", "Open Dolphin on
+ *  the bottom screen" ([labels]: package → label, the list's; the package when it is not
+ *  installed). */
+fun Action.label(labels: Map<String, String> = emptyMap()): String {
     val kind = ActionKind.of(this)
     val screen = ActionKind.screenOf(this) ?: return kind.label
-    return "${kind.label} ${screen.label()}"
+    val app = ActionKind.appOf(this)?.let { labels[it] ?: it }
+    return if (app != null) "Open $app on ${screen.label()}" else "${kind.label} ${screen.label()}"
 }
 
 /** One line for a scope that is not a plain Global(), null for one: the apps by name
@@ -102,8 +115,10 @@ object Copy {
     const val RECORD_OFF = "Turn shortcuts on to record"
     const val NEEDS_MODIFIER = "A shortcut must start with AYN, Home, Back, Start or Select."
     const val MODIFIER_NOTE = "A shortcut on Start or Select makes a plain tap of that button " +
-        "reach the game only when it is released."
+        "reach the game only when it is released, and a hold only after half a second."
     const val NO_APPS = "No apps chosen yet"
+    const val NO_APP = "No app chosen yet"
+    const val CHOOSE_APP = "Choose an app"
     const val LATE = "With a timer, this combo reaches the game only after the timer or the " +
         "release — it will feel late in that game."
 }
@@ -126,12 +141,14 @@ data class EditorDraft(
     val holdMs: String = "400",
     val action: ActionKind = ActionKind.SWAP,
     val screen: ScreenTarget = ScreenTarget.FOCUSED,
+    /** The package an [ActionKind.OPEN] opens; null until chosen, ignored for the rest. */
+    val openApp: String? = null,
     val scope: ScopeKind = ScopeKind.EVERYWHERE,
     /** The packages the scope names: the exclusions for [ScopeKind.EXCEPT], the inclusions
      *  for [ScopeKind.ONLY], ignored for [ScopeKind.EVERYWHERE]. */
     val apps: Set<String> = emptySet(),
-    /** The app picker is open over the editor. */
-    val picker: Boolean = false,
+    /** The app picker is open over the editor, choosing for this; null when it is not. */
+    val picker: Picking? = null,
     /** The last Rejected reason, shown under Save until the next change. */
     val error: String? = null,
 ) {
@@ -154,7 +171,7 @@ data class EditorDraft(
     fun toShortcut(): Shortcut = Shortcut(
         id = id.trim(),
         trigger = trigger(),
-        action = action.action(screen),
+        action = action.action(screen, openApp),
         scope = toScope(),
         enabled = original?.enabled ?: true,
     )
@@ -191,6 +208,7 @@ data class EditorDraft(
             holdMs = (s.trigger.holdMs ?: 400).toString(),
             action = ActionKind.of(s.action),
             screen = ActionKind.screenOf(s.action) ?: ScreenTarget.FOCUSED,
+            openApp = ActionKind.appOf(s.action),
             scope = scopeKindOf(s.scope),
             apps = appsOf(s.scope),
         )

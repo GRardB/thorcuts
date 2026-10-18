@@ -67,6 +67,18 @@ class ShortcutTest {
     }
 
     @Test
+    fun `an app is opened by a package name, and nothing else passes`() {
+        val open = Action.OpenApp("org.dolphinemu.dolphinemu", ScreenTarget.BOTTOM)
+        assertEquals(ScreenTarget.BOTTOM, open.screen)
+        for (bad in listOf("", "dolphin", "org.dolphin emu", "a.b;rm -rf /", "1.b")) {
+            val e = assertFailsWith<IllegalArgumentException> {
+                Action.OpenApp(bad, ScreenTarget.TOP)
+            }
+            assertEquals("The app must be named by its package name (got '$bad')", e.message)
+        }
+    }
+
+    @Test
     fun `a shortcut needs an id`() {
         val t = Trigger(setOf(ModifierKey.AYN), setOf(key(304)))
         assertFailsWith<IllegalArgumentException> { Shortcut("", t, Action.SwapScreens) }

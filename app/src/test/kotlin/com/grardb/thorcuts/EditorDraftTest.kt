@@ -128,11 +128,42 @@ class EditorDraftTest {
     fun `an action that aims at a screen trails an ellipsis in the editor, not in the list`() {
         assertEquals("Close the app on…", ActionKind.CLOSE.choiceLabel)
         assertEquals("Go home on…", ActionKind.HOME.choiceLabel)
+        assertEquals("Open an app…", ActionKind.OPEN.choiceLabel)
         assertEquals("Swap the screens", ActionKind.SWAP.choiceLabel)
         assertEquals(
             "Close the app on the top screen",
             Action.CloseScreen(ScreenTarget.TOP).label(),
         )
+    }
+
+    @Test
+    fun `an open-app action round-trips with its package and screen`() {
+        val d = base().copy(
+            action = ActionKind.OPEN, screen = ScreenTarget.BOTTOM, openApp = "com.a",
+        )
+        val s = d.toShortcut()
+        assertEquals(Action.OpenApp("com.a", ScreenTarget.BOTTOM), s.action)
+        val back = EditorDraft.of(s)
+        assertEquals(ActionKind.OPEN, back.action)
+        assertEquals(ScreenTarget.BOTTOM, back.screen)
+        assertEquals("com.a", back.openApp)
+        assertNull(EditorDraft.of(base().toShortcut()).openApp)      // the swap names none
+    }
+
+    @Test
+    fun `an open-app action with no app chosen is refused`() {
+        val e = assertFailsWith<IllegalArgumentException> {
+            base().copy(action = ActionKind.OPEN).toShortcut()
+        }
+        assertEquals("Choose an app", e.message)
+    }
+
+    @Test
+    fun `the list names the app an action opens, by label when it knows one`() {
+        val open = Action.OpenApp("com.a", ScreenTarget.TOP)
+        assertEquals("Open Zelda on the top screen", open.label(mapOf("com.a" to "Zelda")))
+        assertEquals("Open com.a on the top screen", open.label())
+        assertEquals("Go home on the bottom screen", Action.GoHome(ScreenTarget.BOTTOM).label())
     }
 
     @Test

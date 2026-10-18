@@ -18,7 +18,7 @@ class ActionDispatcherTest {
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
 
     private fun dispatcher(g: FakeGateway) =
-        ActionDispatcher(TaskActions(g, "com.grardb.thorcuts/.MainActivity") { setOf("c.home") })
+        ActionDispatcher(TaskActions(g, { setOf("c.home") }, { pkg -> "$pkg/.MainActivity" }))
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 
@@ -63,14 +63,14 @@ class ActionDispatcherTest {
     }
 
     @Test
-    fun `OpenThorcuts starts the Activity on its screen`() {
+    fun `OpenApp starts the package's launch activity on its screen`() {
         val g = FakeGateway("Starting: Intent { } ")
         assertEquals(
             "OK display 0: Starting: Intent { }",
-            dispatcher(g).dispatch(Action.OpenThorcuts(ScreenTarget.TOP)),
+            dispatcher(g).dispatch(Action.OpenApp("org.dolphinemu.dolphinemu", ScreenTarget.TOP)),
         )
         assertEquals(
-            listOf(script("am start --display 0 -n 'com.grardb.thorcuts/.MainActivity'")),
+            listOf(script("am start --display 0 -n 'org.dolphinemu.dolphinemu/.MainActivity'")),
             g.calls,
         )
     }

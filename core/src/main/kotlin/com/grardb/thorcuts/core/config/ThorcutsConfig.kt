@@ -44,14 +44,23 @@ data class ThorcutsConfig(
         return copy(shortcuts = shortcuts + shortcut)
     }
 
-    /** The same list with the shortcut of [shortcut]'s id replaced in place. An absent id is
-     *  refused: the editor replaces what it opened, and silently appending would hide a
-     *  shortcut that went away under it. */
-    fun replaced(shortcut: Shortcut): ThorcutsConfig {
-        require(shortcuts.any { it.id == shortcut.id }) {
-            "No shortcut '${shortcut.id}' to replace"
+    /**
+     * The same list with the shortcut named [replacing] replaced in place by [shortcut] —
+     * a rename when the two ids differ, the row keeping its place and the unknown members the
+     * file kept under the old name moving to the new one. An absent [replacing] is refused:
+     * the editor replaces what it opened, and silently appending would hide a shortcut that
+     * went away under it. A new name another shortcut already has is refused by name, as
+     * [added] refuses one.
+     */
+    fun replaced(shortcut: Shortcut, replacing: String = shortcut.id): ThorcutsConfig {
+        require(shortcuts.any { it.id == replacing }) { "No shortcut '$replacing' to replace" }
+        require(shortcut.id == replacing || shortcuts.none { it.id == shortcut.id }) {
+            "A shortcut named '${shortcut.id}' already exists"
         }
-        return copy(shortcuts = shortcuts.map { if (it.id == shortcut.id) shortcut else it })
+        return copy(
+            shortcuts = shortcuts.map { if (it.id == replacing) shortcut else it },
+            unknown = unknown.renamed(replacing, shortcut.id),
+        )
     }
 
     /** The same list without the shortcut [id], and without the unknown members the file
@@ -77,6 +86,14 @@ class UnknownFields internal constructor(
 
     /** The same members without those kept under the shortcut [id]. */
     internal fun without(id: String): UnknownFields = UnknownFields(top, perShortcut - id)
+
+    /** The same members, those kept under [from] now under [to]; the same when the two are
+     *  one name or nothing was kept under [from]. */
+    internal fun renamed(from: String, to: String): UnknownFields {
+        if (from == to) return this
+        val moved = perShortcut[from] ?: return this
+        return UnknownFields(top, perShortcut - from + (to to moved))
+    }
 
     override fun equals(other: Any?): Boolean =
         other is UnknownFields && top == other.top && perShortcut == other.perShortcut

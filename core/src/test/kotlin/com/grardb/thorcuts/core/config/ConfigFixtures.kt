@@ -26,6 +26,9 @@ internal fun configFixture(name: String): String {
 internal const val DOLPHIN = "org.dolphinemu.dolphinemu"
 internal const val RETROARCH = "com.retroarch.aarch64"
 
+/** Thorcuts' own package: what the fixtures' open shortcuts open. */
+internal const val THORCUTS = "com.grardb.thorcuts"
+
 internal fun padKey(code: Int) = Control(Device.PAD, EvdevType.KEY, code, 1)
 
 /** BTN_NORTH — the X button on the Thor's pad (M1 findings, control table). */
@@ -69,8 +72,8 @@ internal val ACTIONS_RUN = ThorcutsConfig(
         press("close-bottom", padKey(311), Action.CloseScreen(ScreenTarget.BOTTOM)),
         press("home-focused", padKey(305), Action.GoHome(ScreenTarget.FOCUSED)),
         press("home-bottom", padKey(318), Action.GoHome(ScreenTarget.BOTTOM)),
-        press("open-bottom", padKey(308), Action.OpenThorcuts(ScreenTarget.BOTTOM)),
-        press("open-top", padKey(317), Action.OpenThorcuts(ScreenTarget.TOP)),
+        press("open-bottom", padKey(308), Action.OpenApp(THORCUTS, ScreenTarget.BOTTOM)),
+        press("open-top", padKey(317), Action.OpenApp(THORCUTS, ScreenTarget.TOP)),
         press(
             "move-focused",
             Control(Device.PAD, EvdevType.ABS, 17, -1),   // D-pad up
@@ -116,7 +119,7 @@ internal val KITCHEN_SINK = ThorcutsConfig(
         Shortcut(
             id = "open-bottom",
             trigger = Trigger(setOf(ModifierKey.SELECT)),
-            action = Action.OpenThorcuts(ScreenTarget.BOTTOM),
+            action = Action.OpenApp(THORCUTS, ScreenTarget.BOTTOM),
         ),
         Shortcut(
             id = "swap",

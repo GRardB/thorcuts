@@ -94,6 +94,41 @@ class ThorcutsConfigTest {
     }
 
     @Test
+    fun `replaced under another id renames in place and refuses a name that is taken`() {
+        val c = ThorcutsConfig(listOf(shortcut("a"), shortcut("b"), shortcut("c")))
+        val renamed = c.replaced(shortcut("x"), replacing = "b")
+        assertEquals(listOf("a", "x", "c"), renamed.shortcuts.map { it.id })   // its place kept
+        assertEquals(shortcut("x"), renamed.shortcut("x"))
+        assertNull(renamed.shortcut("b"))
+        val taken = assertFailsWith<IllegalArgumentException> {
+            c.replaced(shortcut("c"), replacing = "b")
+        }
+        assertEquals("A shortcut named 'c' already exists", taken.message)
+        val absent = assertFailsWith<IllegalArgumentException> {
+            c.replaced(shortcut("x"), replacing = "zzz")
+        }
+        assertEquals("No shortcut 'zzz' to replace", absent.message)
+    }
+
+    @Test
+    fun `a rename carries the unknown members the file kept under the old name`() {
+        val read = ConfigCodec.decode(configFixture("kitchen-sink.json"))
+        val c = assertIs<DecodeResult.Ok>(read).config
+        val old = c.shortcut("close-in-emulators")!!
+        val renamed = c.replaced(old.copy(id = "close-in-emus"), replacing = "close-in-emulators")
+        assertEquals(setOf("close-in-emus"), renamed.unknown.perShortcut.keys)
+        assertEquals(
+            c.unknown.perShortcut["close-in-emulators"],
+            renamed.unknown.perShortcut["close-in-emus"],
+        )
+        assertEquals(c.unknown.top, renamed.unknown.top)
+        // and the written file keeps the note under the new name
+        val written = ConfigCodec.encode(renamed)
+        assertTrue("an unknown shortcut member" in written, written)
+        assertEquals(DecodeResult.Ok(renamed, emptyList(), null), ConfigCodec.decode(written))
+    }
+
+    @Test
     fun `without removes the entry and the unknown members the file kept under its id`() {
         val read = ConfigCodec.decode(configFixture("kitchen-sink.json"))
         val c = assertIs<DecodeResult.Ok>(read).config

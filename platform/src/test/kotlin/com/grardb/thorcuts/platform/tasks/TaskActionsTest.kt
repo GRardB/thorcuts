@@ -6,14 +6,18 @@ import com.grardb.thorcuts.platform.privilege.FakeGateway
 import com.grardb.thorcuts.platform.privilege.FakeGateway.Call
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class TaskActionsTest {
 
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
-    private val main = "com.grardb.thorcuts/.MainActivity"
+
+    /** Thorcuts' own package, and its component as the app's resolver writes one. */
+    private val thorcuts = "com.grardb.thorcuts"
     private val quotedMain = "'com.grardb.thorcuts/.MainActivity'"
+
+    /** The resolver every test uses unless it says otherwise: a `.MainActivity` per package. */
+    private val mainOf: (String) -> String? = { pkg -> "$pkg/.MainActivity" }
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 
@@ -22,8 +26,11 @@ class TaskActionsTest {
         Call.Script(listOf("$command 2>&1 | tr '\\n' ' '"))
 
     /** One launcher by default: with none resolved, close refuses before it reaches the tool. */
-    private fun actions(g: FakeGateway, launchers: Set<String> = setOf("c.launcher")) =
-        TaskActions(g, main) { launchers }
+    private fun actions(
+        g: FakeGateway,
+        launchers: Set<String> = setOf("c.launcher"),
+        resolve: (String) -> String? = mainOf,
+    ) = TaskActions(g, { launchers }, resolve)
 
     // ── the tool's subcommands ────────────────────────────────────────────────────────
 
@@ -71,7 +78,7 @@ class TaskActionsTest {
     fun `closeScreen asks for the launchers on every call`() {
         var asked = 0
         val g = FakeGateway("OK closed 1@0 a.b", "OK closed 2@0 a.b")
-        val a = TaskActions(g, main) { asked++; setOf("c.launcher") }
+        val a = TaskActions(g, { asked++; setOf("c.launcher") }, mainOf)
         a.closeScreen(ScreenTarget.TOP)
         a.closeScreen(ScreenTarget.TOP)
         assertEquals(2, asked)
@@ -84,7 +91,7 @@ class TaskActionsTest {
     @Test
     fun `closeScreen passes only names that are packages`() {
         val g = FakeGateway("OK closed 1@4 a.b")
-        val a = TaskActions(g, main) { setOf("rip.moth.cocoonshell", "not a package; rm x") }
+        val a = TaskActions(g, { setOf("rip.moth.cocoonshell", "not a package; rm x") }, mainOf)
         a.closeScreen(ScreenTarget.BOTTOM)
         assertEquals(listOf(entryPoint("close", "4", "rip.moth.cocoonshell")), g.calls)
     }
@@ -92,7 +99,7 @@ class TaskActionsTest {
     @Test
     fun `closeScreen answers an ERR line when the launchers cannot be resolved`() {
         val g = FakeGateway()
-        val a = TaskActions(g, main) { throw IllegalStateException("pm dead") }
+        val a = TaskActions(g, { throw IllegalStateException("pm dead") }, mainOf)
         val line = a.closeScreen(ScreenTarget.BOTTOM)
         assertTrue(line.startsWith("ERR launchers: "), line)
         assertTrue(g.calls.isEmpty())                  // nothing reached the tool
@@ -103,7 +110,7 @@ class TaskActionsTest {
         // Every device has a HOME handler, so an empty resolution means the query failed —
         // and a close with no names would remove a launcher that happened to be the app.
         val g = FakeGateway()
-        val a = TaskActions(g, main) { emptySet() }
+        val a = TaskActions(g, { emptySet() }, mainOf)
         assertEquals("ERR launchers: none resolved; not closing", a.closeScreen(ScreenTarget.TOP))
         assertTrue(g.calls.isEmpty())
     }
@@ -146,45 +153,45 @@ class TaskActionsTest {
         assertEquals(listOf(script("input -d 4 keyevent KEYCODE_HOME")), g.calls)
     }
 
-    // ── open Thorcuts: am start on the display ────────────────────────────────────────
+    // ── open an app: its launch activity resolved, then am start on the display ───────
 
     @Test
-    fun `openThorcuts starts the Activity on the display with the component quoted`() {
+    fun `openApp starts the Activity on the display with the component quoted`() {
         val g = FakeGateway("Starting: Intent { cmp=com.grardb.thorcuts/.MainActivity } ")
         assertEquals(
             "OK display 4: Starting: Intent { cmp=com.grardb.thorcuts/.MainActivity }",
-            actions(g).openThorcuts(ScreenTarget.BOTTOM),
+            actions(g).openApp(thorcuts, ScreenTarget.BOTTOM),
         )
         assertEquals(listOf(script("am start --display 4 -n $quotedMain")), g.calls)
     }
 
     @Test
-    fun `openThorcuts reports am's Error line as an ERR`() {
+    fun `openApp reports am's Error line as an ERR`() {
         val out = "Starting: Intent { cmp=x/.Y } Error: Activity class {x/.Y} does not exist."
         val g = FakeGateway(out)
-        assertEquals("ERR am: $out", actions(g).openThorcuts(ScreenTarget.TOP))
+        assertEquals("ERR am: $out", actions(g).openApp(thorcuts, ScreenTarget.TOP))
         assertEquals(listOf(script("am start --display 0 -n $quotedMain")), g.calls)
     }
 
     @Test
-    fun `openThorcuts reports an exception in am's output as an ERR`() {
+    fun `openApp reports an exception in am's output as an ERR`() {
         // A Java trace from am has no "Error:" line, and it begins with "Starting:" like a
         // success does — which is why the classifier is negative, not startsWith.
         val out = "Starting: Intent { cmp=x/.Y } Exception occurred while executing 'start': " +
             "java.lang.SecurityException: Permission Denial"
         val g = FakeGateway(out)
-        assertEquals("ERR am: $out", actions(g).openThorcuts(ScreenTarget.TOP))
+        assertEquals("ERR am: $out", actions(g).openApp(thorcuts, ScreenTarget.TOP))
     }
 
     @Test
-    fun `openThorcuts FOCUSED asks the tool which display first`() {
+    fun `openApp FOCUSED asks the tool which display first`() {
         val g = FakeGateway(
             "OK focused display=4 task=1548 pkg=org.dolphinemu.dolphinemu",
             "Starting: Intent { } ",
         )
         assertEquals(
             "OK display 4: Starting: Intent { }",
-            actions(g).openThorcuts(ScreenTarget.FOCUSED),
+            actions(g).openApp(thorcuts, ScreenTarget.FOCUSED),
         )
         assertEquals(
             listOf(entryPoint("focused"), script("am start --display 4 -n $quotedMain")),
@@ -193,20 +200,88 @@ class TaskActionsTest {
     }
 
     @Test
-    fun `openThorcuts FOCUSED returns the tool's ERR line and starts nothing`() {
+    fun `openApp FOCUSED returns the tool's ERR line and starts nothing`() {
         val g = FakeGateway("ERR no focused root task")
-        assertEquals("ERR no focused root task", actions(g).openThorcuts(ScreenTarget.FOCUSED))
+        assertEquals("ERR no focused root task", actions(g).openApp(thorcuts, ScreenTarget.FOCUSED))
         assertEquals(listOf(entryPoint("focused")), g.calls)
     }
 
     @Test
-    fun `openThorcuts FOCUSED refuses a focused line it cannot parse`() {
+    fun `openApp FOCUSED refuses a focused line it cannot parse`() {
         val g = FakeGateway("OK focused but no display here")
         assertEquals(
             "ERR unexpected focused line: OK focused but no display here",
-            actions(g).openThorcuts(ScreenTarget.FOCUSED),
+            actions(g).openApp(thorcuts, ScreenTarget.FOCUSED),
         )
         assertEquals(listOf(entryPoint("focused")), g.calls)
+    }
+
+    @Test
+    fun `openApp starts whatever component the resolver names for the package, quoted`() {
+        val g = FakeGateway("Starting: Intent { } ")
+        val a = actions(g) { pkg -> "$pkg/org.dolphinemu.dolphinemu.ui.MainActivity" }
+        assertEquals(
+            "OK display 0: Starting: Intent { }",
+            a.openApp("org.dolphinemu.dolphinemu", ScreenTarget.TOP),
+        )
+        assertEquals(
+            listOf(
+                script(
+                    "am start --display 0 -n " +
+                        "'org.dolphinemu.dolphinemu/org.dolphinemu.dolphinemu.ui.MainActivity'",
+                ),
+            ),
+            g.calls,
+        )
+    }
+
+    @Test
+    fun `openApp answers a line and runs nothing when the package has no launch activity`() {
+        val g = FakeGateway()
+        val a = actions(g) { null }
+        assertEquals(
+            "ERR no launch activity for org.gone.app",
+            a.openApp("org.gone.app", ScreenTarget.BOTTOM),
+        )
+        // FOCUSED too: the component comes before the round trip for the display
+        assertEquals(
+            "ERR no launch activity for org.gone.app",
+            a.openApp("org.gone.app", ScreenTarget.FOCUSED),
+        )
+        assertTrue(g.calls.isEmpty())
+    }
+
+    @Test
+    fun `openApp answers a line when the resolver throws, or names a non-component`() {
+        val g = FakeGateway()
+        val dead = actions(g) { throw IllegalStateException("pm dead") }
+        assertEquals(
+            "ERR launch activity: java.lang.IllegalStateException: pm dead",
+            dead.openApp(thorcuts, ScreenTarget.TOP),
+        )
+        val odd = actions(g) { "not a component; rm -rf /" }
+        assertEquals(
+            "ERR not a component name: 'not a component; rm -rf /'",
+            odd.openApp(thorcuts, ScreenTarget.TOP),
+        )
+        assertTrue(g.calls.isEmpty())                  // nothing reached a shell
+    }
+
+    @Test
+    fun `openApp asks the resolver on every call`() {
+        val asked = mutableListOf<String>()
+        val g = FakeGateway("", "")
+        val a = actions(g) { pkg -> asked += pkg; "$pkg/.Main" }
+        a.openApp("a.b", ScreenTarget.TOP)
+        a.openApp("c.d", ScreenTarget.BOTTOM)
+        assertEquals(listOf("a.b", "c.d"), asked)
+        assertEquals(
+            listOf(
+                script("am start --display 0 -n 'a.b/.Main'"),
+                script("am start --display 4 -n 'c.d/.Main'"),
+            ),
+            g.calls,
+        )
     }
 
     // ── the contract every method keeps ───────────────────────────────────────────────
@@ -219,10 +294,10 @@ class TaskActionsTest {
         assertEquals(noReply, actions(FakeGateway(null)).closeScreen(ScreenTarget.TOP))
         assertEquals(noReply, actions(FakeGateway(null)).moveFocusedToOtherScreen())
         assertEquals(noReply, actions(FakeGateway(null)).goHome(ScreenTarget.TOP))
-        assertEquals(noReply, actions(FakeGateway(null)).openThorcuts(ScreenTarget.TOP))
+        assertEquals(noReply, actions(FakeGateway(null)).openApp(thorcuts, ScreenTarget.TOP))
         // FOCUSED open: the tool answered, am did not.
         val toolThenNothing = FakeGateway("OK focused display=0 task=1 pkg=a.b", null)
-        assertEquals(noReply, actions(toolThenNothing).openThorcuts(ScreenTarget.FOCUSED))
+        assertEquals(noReply, actions(toolThenNothing).openApp(thorcuts, ScreenTarget.FOCUSED))
     }
 
     @Test
@@ -233,7 +308,7 @@ class TaskActionsTest {
         assertEquals(noLine, actions(FakeGateway("")).listTasks())
         assertEquals(noLine, actions(FakeGateway(" ")).closeScreen(ScreenTarget.TOP))
         val g = FakeGateway("")
-        assertEquals(noLine, actions(g).openThorcuts(ScreenTarget.FOCUSED))
+        assertEquals(noLine, actions(g).openApp(thorcuts, ScreenTarget.FOCUSED))
         assertEquals(listOf(entryPoint("focused")), g.calls)   // and am never ran
     }
 
@@ -248,8 +323,8 @@ class TaskActionsTest {
         val a = actions(g)
         a.goHome(ScreenTarget.TOP)
         a.goHome(ScreenTarget.FOCUSED)
-        a.openThorcuts(ScreenTarget.TOP)
-        a.openThorcuts(ScreenTarget.BOTTOM)
+        a.openApp(thorcuts, ScreenTarget.TOP)
+        a.openApp(thorcuts, ScreenTarget.BOTTOM)
         val scripts = g.calls.filterIsInstance<Call.Script>().map { it.lines }
         assertEquals(4, scripts.size)
         for (lines in scripts) {
@@ -258,13 +333,4 @@ class TaskActionsTest {
         }
     }
 
-    @Test
-    fun `a component that is not one is refused at construction`() {
-        assertFailsWith<IllegalArgumentException> {
-            TaskActions(FakeGateway(), "no slash") { emptySet() }
-        }
-        assertFailsWith<IllegalArgumentException> {
-            TaskActions(FakeGateway(), "a.b/.C; rm x") { emptySet() }
-        }
-    }
 }

@@ -4,8 +4,8 @@ import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.ThorControls
 
-/** A piece's outline: a rounded rectangle (the modifiers, the shoulders, anything else) or a
- *  circle (the face buttons, the stick clicks, the D-pad). */
+/** A piece's outline: a rounded rectangle (AYN, the shoulders, the D-pad, anything else) or
+ *  a circle (the four glyph modifiers, the face buttons, the stick clicks). */
 enum class PieceShape { RECT, CIRCLE }
 
 /** A piece's fill: gray for most, one colour each for A, B, X and Y. */
@@ -37,15 +37,17 @@ private fun glyph(name: String, glyph: Glyph, shape: PieceShape = PieceShape.REC
 private fun circle(name: String, fill: PieceFill = PieceFill.GRAY) =
     PieceSpec(name, PieceShape.CIRCLE, fill, label = name)
 
-/** The five modifiers: AYN by name, the other four by glyph, all gray rectangles. */
+/** The five modifiers, all gray: AYN by name in a rectangle (a word does not fit a circle),
+ *  the other four by glyph in a circle, as the buttons they are on the Thor (the owner,
+ *  2026-10-18). */
 fun pieceOf(m: ModifierKey): PieceSpec {
     val name = ThorControls.name(m)
     return when (m) {
         ModifierKey.AYN -> rect(name)
-        ModifierKey.HOME -> glyph(name, Glyph.HOME)
-        ModifierKey.BACK -> glyph(name, Glyph.BACK)
-        ModifierKey.START -> glyph(name, Glyph.PLAY)
-        ModifierKey.SELECT -> glyph(name, Glyph.SQUARE)
+        ModifierKey.HOME -> glyph(name, Glyph.HOME, PieceShape.CIRCLE)
+        ModifierKey.BACK -> glyph(name, Glyph.BACK, PieceShape.CIRCLE)
+        ModifierKey.START -> glyph(name, Glyph.PLAY, PieceShape.CIRCLE)
+        ModifierKey.SELECT -> glyph(name, Glyph.SQUARE, PieceShape.CIRCLE)
     }
 }
 
@@ -63,10 +65,12 @@ fun pieceOf(c: Control): PieceSpec {
         "X" -> circle(name, PieceFill.BLUE)
         "Y" -> circle(name, PieceFill.GREEN)
         "L3", "R3" -> circle(name)
-        "D-pad up" -> glyph(name, Glyph.UP, PieceShape.CIRCLE)
-        "D-pad down" -> glyph(name, Glyph.DOWN, PieceShape.CIRCLE)
-        "D-pad left" -> glyph(name, Glyph.LEFT, PieceShape.CIRCLE)
-        "D-pad right" -> glyph(name, Glyph.RIGHT, PieceShape.CIRCLE)
+        // The D-pad's directions are rectangles (the owner, 2026-10-18): the pad is a cross,
+        // not four round buttons.
+        "D-pad up" -> glyph(name, Glyph.UP)
+        "D-pad down" -> glyph(name, Glyph.DOWN)
+        "D-pad left" -> glyph(name, Glyph.LEFT)
+        "D-pad right" -> glyph(name, Glyph.RIGHT)
         "Volume +" -> rect(name, "Vol +")
         else -> rect(name)
     }

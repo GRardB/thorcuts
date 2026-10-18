@@ -15,23 +15,23 @@ import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
  * the same "ERR no reply from pservice" line from every method, so callers handle one
  * shape of result.
  *
- * [thorcutsMain] is Thorcuts' own Activity as `am start -n` takes it
- * (`com.grardb.thorcuts/.MainActivity`); the app passes it so this module need not know
- * the app's package. Validated at construction, then quoted like any component that
- * reaches a root shell — a value the app computes is not a silent exception to the rule.
- *
  * [homePackages] answers "which packages are a launcher" — HOME and SECONDARY_HOME, as
  * `HomePackages.resolve` reads them from PackageManager — and is asked on every close, so
  * a launcher change is honoured; the tool refuses to close any of them by name.
+ *
+ * [launchComponent] answers "which activity opens this package" as `am start -n` takes it
+ * (`org.x/.Main`, or null for a package with no launch activity, or not installed) — the
+ * app's `getLaunchIntentForPackage`, asked on every open so an install or an update is
+ * honoured. Resolved on the app side rather than by an implicit MAIN/LAUNCHER intent in
+ * `am`, which can hit a chooser when a package has two launcher activities. What comes
+ * back is validated and quoted like any component that reaches a root shell — a value
+ * PackageManager computed is not a silent exception to the rule.
  */
 class TaskActions(
     private val gateway: PrivilegeGateway,
-    thorcutsMain: String,
     private val homePackages: () -> Set<String>,
+    private val launchComponent: (String) -> String?,
 ) {
-
-    private val thorcutsMainArg: String = CommandSafety.componentArg(thorcutsMain)
-        ?: throw IllegalArgumentException("not a component name: '$thorcutsMain'")
 
     /** Every task with its display and visibility, plus the focused one, for diagnostics;
      *  since M3 nothing in the app calls it (the device runs use the tool's `list`). */
@@ -90,17 +90,27 @@ class TaskActions(
     }
 
     /**
-     * Open Thorcuts on [screen]: `am start --display <id>`, run as uid 0 so Android's
-     * background-launch restriction (which blocks a stopped app starting its own
-     * Activity — exactly when a shortcut needs it) does not apply. `am` prints
-     * `Starting: Intent {…}` first and an `Error: …` or a "brought to the front" warning
-     * on later lines; pservice returns one line, so the script folds them and this
-     * classifies: `Error` or `Exception` anywhere in the output is a failure (a Java trace
-     * from `am` has no `Error:` line). A positive `Starting:` test would not do — `am`
-     * prints it BEFORE it tries, so a failed start begins with it too. For FOCUSED the tool
-     * is asked which display first: two round trips, serialised on the one thread.
+     * Open [packageName]'s launch activity on [screen]: `am start --display <id> -n`, run as
+     * uid 0 so Android's background-launch restriction (which blocks a stopped app starting
+     * an Activity — exactly when a shortcut needs it) does not apply. The component is
+     * resolved first ([launchComponent]: a package with none, a resolver that throws — it is
+     * a binder call — or a name that is not a component is answered as a line, and nothing
+     * runs), then for FOCUSED the tool is asked which display: two round trips, serialised
+     * on the one thread. `am` prints `Starting: Intent {…}` first and an `Error: …` or a
+     * "brought to the front" warning on later lines; pservice returns one line, so the
+     * script folds them and this classifies: `Error` or `Exception` anywhere in the output
+     * is a failure (a Java trace from `am` has no `Error:` line). A positive `Starting:`
+     * test would not do — `am` prints it BEFORE it tries, so a failed start begins with it
+     * too.
      */
-    fun openThorcuts(screen: ScreenTarget): String {
+    fun openApp(packageName: String, screen: ScreenTarget): String {
+        val component = try {
+            launchComponent(packageName)
+        } catch (e: RuntimeException) {
+            return "ERR launch activity: $e"
+        } ?: return "ERR no launch activity for $packageName"
+        val componentArg = CommandSafety.componentArg(component)
+            ?: return "ERR not a component name: '$component'"
         val display = if (screen == ScreenTarget.FOCUSED) {
             val line = tool("focused")
             if (!line.startsWith("OK ")) return line
@@ -109,7 +119,7 @@ class TaskActions(
         } else {
             screenArg(screen)
         }
-        val out = shell("am start --display $display -n $thorcutsMainArg") ?: return NO_REPLY
+        val out = shell("am start --display $display -n $componentArg") ?: return NO_REPLY
         return if ("Error" in out || "Exception" in out) "ERR am: $out"
         else "OK display $display: $out"
     }

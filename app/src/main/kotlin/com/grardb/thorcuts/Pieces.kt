@@ -28,7 +28,8 @@ import com.grardb.thorcuts.core.model.TriggerStyle
 
 /** The four face colours, fixed in both themes; the gray is the theme's `surfaceVariant`. */
 private val Red = Color(0xFFD32F2F)
-private val Yellow = Color(0xFFF9A825)
+/** Material yellow 600, not amber: the owner found amber 800 too orange (2026-10-18). */
+private val Yellow = Color(0xFFFDD835)
 private val Blue = Color(0xFF1976D2)
 private val Green = Color(0xFF388E3C)
 
@@ -51,8 +52,9 @@ private fun Glyph.rotation(): Float = when (this) {
     else -> 0f
 }
 
-/** One piece as [PieceSpec] describes it: 28dp tall, a circle or an 8dp-cornered rectangle,
- *  its glyph and/or label on the fill; the control's name for a screen reader. */
+/** One piece as [PieceSpec] describes it: 28dp tall, a circle (28dp wide, the 16dp glyph
+ *  centred) or an 8dp-cornered rectangle, its glyph and/or label on the fill; the control's
+ *  name for a screen reader. */
 @Composable
 fun Piece(spec: PieceSpec) {
     val (fill, content) = when (spec.fill) {

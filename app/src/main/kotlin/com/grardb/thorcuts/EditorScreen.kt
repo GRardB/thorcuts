@@ -47,9 +47,10 @@ import com.grardb.thorcuts.core.model.ScreenTarget
 private val NESTED = 32.dp
 
 /**
- * One shortcut being added or edited: its name, the recorder, Tap or Timer, the action and
- * — nested under it — its screen, where it applies and — nested — the chosen apps, Save /
- * Cancel / Delete (which asks first). Nothing here is privileged. A recording ends with the
+ * One shortcut being added or edited: its name (editable on an existing one too: a rename),
+ * the recorder, Tap or Timer, the action and — nested under it — the app it opens and its
+ * screen, where it applies and — nested — the chosen apps, Save / Cancel / Delete (which asks
+ * first). Nothing here is privileged. A recording ends with the
  * combo's release (the ViewModel), on Cancel and Save, on the timeout, and when this screen
  * stops or leaves composition — the gate must not stay shut behind a screen that is gone.
  */
@@ -72,12 +73,12 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
                 .padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // The name is typed once: the file (as its id), the reasons and the log name it.
+            // The name: the file (as its id), the reasons and the log name it. Editable on an
+            // existing shortcut too — Save replaces the one it opened, under its old name.
             SectionLabel("Name")
             OutlinedTextField(
                 value = draft.id,
                 onValueChange = vm::setId,
-                readOnly = draft.original != null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -132,11 +133,31 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             state.warning?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
             // The screen choice sits under the action it belongs to, indented, so it is in
-            // sight the moment that action is picked.
+            // sight the moment that action is picked; "Open an app" puts the app first,
+            // the way the list reads it ("Open Dolphin on the bottom screen").
+            val installed = state.apps.associateBy { it.packageName }
             SectionLabel("Action")
             for (kind in ActionKind.entries) {
                 ChoiceRow(kind.choiceLabel, selected = draft.action == kind) {
                     vm.setAction(kind)
+                }
+                if (draft.action == kind && kind == ActionKind.OPEN) {
+                    Column(
+                        modifier = Modifier.padding(start = NESTED),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val pkg = draft.openApp
+                        if (pkg == null) {
+                            Text(Copy.NO_APP, style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            ChosenApp(installed[pkg], pkg)
+                        }
+                        FilledTonalButton(
+                            onClick = vm::openAppPicker,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Choose app…") }
+                    }
                 }
                 if (draft.action == kind && kind.takesScreen) {
                     for (target in ScreenTarget.entries) {
@@ -151,7 +172,6 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
 
             // Likewise the chosen apps, by icon and name, under the scope they belong to.
             SectionLabel("Where")
-            val installed = state.apps.associateBy { it.packageName }
             for (kind in ScopeKind.entries) {
                 ChoiceRow(kind.label, selected = draft.scope == kind) { vm.setScope(kind) }
                 if (draft.scope == kind && kind != ScopeKind.EVERYWHERE) {
@@ -209,7 +229,8 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
                 if (confirmDelete) {
                     AlertDialog(
                         onDismissRequest = { confirmDelete = false },
-                        title = { Text("Delete '${draft.id}'?") },
+                        // The saved name, not the one being typed: that is what goes.
+                        title = { Text("Delete '${draft.original.id}'?") },
                         confirmButton = {
                             TextButton(
                                 onClick = {

@@ -11,5 +11,7 @@ reads these. Layout: `docs/superpowers/specs/2026-10-13-m2-config-layer-design.m
 | `actions-run.json` | The actions device run's input (actions spec): nine shortcuts, every action kind and every screen target that run exercises, each AYN + one button (the swap keeps its HOLD). `encode(ConfigFixtures.ACTIONS_RUN)` byte for byte, and it decodes back with nothing dropped. Placed on the device with `run-as` before a cold start. |
 
 `default.json`, `kitchen-sink.canonical.json` and `actions-run.json` are the encoder's own
-output, captured once when each landed and never hand-edited; `kitchen-sink.json` is the one
+output, captured once when each landed and never hand-edited — except that `OpenThorcuts`
+became `OpenApp` with a `package` in the latter two by hand when the action did (2026-10-18),
+and the tests pin that the encoder still agrees byte for byte; `kitchen-sink.json` is the one
 hand-made file and must stay that way — it is the independent derivation the decoder is pinned to.

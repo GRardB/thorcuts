@@ -57,6 +57,9 @@ data class Dropped(val index: Int, val id: String?, val reason: String)
  * order, sets sorted, then the unknown members as they were read.
  */
 object ConfigCodec {
+    /** Still 1 when `OpenThorcuts` became `OpenApp` (2026-10-18): the owner's device is the
+     *  only install, so the old kind was retired without a migration — a file that still
+     *  carries it drops that entry with "unknown action kind". */
     const val SCHEMA_VERSION = 1
 
     private const val SCHEMA_VERSION_KEY = "schemaVersion"
@@ -189,14 +192,18 @@ object ConfigCodec {
     private fun readAction(o: JsonObject): Action {
         val kind = o.string("kind")
         val screen = o["screen"]?.asEnum<ScreenTarget>("screen")
+        val pkg = o["package"]?.asString("package")
         fun needsScreen(): ScreenTarget = screen ?: fail("$kind needs a screen")
         fun noScreen() { if (screen != null) fail("$kind takes no screen") }
+        fun noPackage() { if (pkg != null) fail("$kind takes no package") }
         return when (kind) {
-            "SwapScreens" -> { noScreen(); Action.SwapScreens }
-            "MoveFocusedToOtherScreen" -> { noScreen(); Action.MoveFocusedToOtherScreen }
-            "CloseScreen" -> Action.CloseScreen(needsScreen())
-            "GoHome" -> Action.GoHome(needsScreen())
-            "OpenThorcuts" -> Action.OpenThorcuts(needsScreen())
+            "SwapScreens" -> { noScreen(); noPackage(); Action.SwapScreens }
+            "MoveFocusedToOtherScreen" -> {
+                noScreen(); noPackage(); Action.MoveFocusedToOtherScreen
+            }
+            "CloseScreen" -> { noPackage(); Action.CloseScreen(needsScreen()) }
+            "GoHome" -> { noPackage(); Action.GoHome(needsScreen()) }
+            "OpenApp" -> Action.OpenApp(pkg ?: fail("$kind needs a package"), needsScreen())
             else -> fail("unknown action kind '$kind'")
         }
     }
@@ -256,7 +263,11 @@ object ConfigCodec {
                     Action.MoveFocusedToOtherScreen -> put("kind", "MoveFocusedToOtherScreen")
                     is Action.CloseScreen -> screenAction("CloseScreen", a.screen)
                     is Action.GoHome -> screenAction("GoHome", a.screen)
-                    is Action.OpenThorcuts -> screenAction("OpenThorcuts", a.screen)
+                    is Action.OpenApp -> {
+                        put("kind", "OpenApp")
+                        put("package", a.packageName)
+                        put("screen", a.screen.name)
+                    }
                 }
             }
             putJsonObject("scope") {

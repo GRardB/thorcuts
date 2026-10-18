@@ -28,7 +28,9 @@ internal class Migrations(private val steps: Map<Int, (JsonObject) -> JsonObject
     companion object {
         const val SCHEMA_VERSION_KEY = "schemaVersion"
 
-        /** Empty at schema version 1: there is nothing older to migrate from yet. */
+        /** Empty at schema version 1: there is nothing older to migrate from yet. `OpenThorcuts`
+         *  became `OpenApp` (2026-10-18) without a step — the owner's device is the only
+         *  install, and its file held none. */
         val CURRENT: Map<Int, (JsonObject) -> JsonObject> = emptyMap()
     }
 }

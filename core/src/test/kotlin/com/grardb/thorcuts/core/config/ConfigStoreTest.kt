@@ -126,7 +126,7 @@ class ConfigStoreTest {
 
     @Test
     fun `a file from a newer schema is set aside, never overwritten in place`() {
-        val newer = """{"schemaVersion":2,"shortcuts":[]}"""
+        val newer = """{"schemaVersion":${ConfigCodec.SCHEMA_VERSION + 1},"shortcuts":[]}"""
         file.text = newer
         runBlocking { store().load() }
         assertEquals(listOf(newer), file.setAsides)

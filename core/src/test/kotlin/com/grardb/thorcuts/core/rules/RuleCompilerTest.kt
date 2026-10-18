@@ -93,7 +93,7 @@ class RuleCompilerTest {
         Shortcut(
             id = "tap-ayn-opens",
             trigger = Trigger(setOf(ModifierKey.AYN)),
-            action = Action.OpenThorcuts(ScreenTarget.TOP),
+            action = Action.OpenApp("com.grardb.thorcuts", ScreenTarget.TOP),
         ),
     )
 

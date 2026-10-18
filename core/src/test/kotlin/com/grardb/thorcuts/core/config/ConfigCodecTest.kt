@@ -1,7 +1,9 @@
 package com.grardb.thorcuts.core.config
 
+import com.grardb.thorcuts.core.model.Action
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Trigger
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -17,7 +19,9 @@ class ConfigCodecTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────────────
 
-    private fun file(vararg shortcuts: String, version: String = "1") =
+    private fun file(
+        vararg shortcuts: String, version: String = ConfigCodec.SCHEMA_VERSION.toString(),
+    ) =
         """{"schemaVersion": $version, "shortcuts": [${shortcuts.joinToString(",")}]}"""
 
     private fun button(code: Int) = """{"device":"PAD","type":"KEY","code":$code,"value":1}"""
@@ -306,8 +310,37 @@ class ConfigCodecTest {
                 to "CloseScreen needs a screen",
             swap.replace(""""kind":"SwapScreens"""", """"kind":"GoHome","screen":"LEFT"""")
                 to "screen: unknown name 'LEFT'",
+            swap.replace(""""kind":"SwapScreens"""", """"kind":"OpenApp","screen":"TOP"""")
+                to "OpenApp needs a package",
+            swap.replace(""""kind":"SwapScreens"""", """"kind":"SwapScreens","package":"a.b"""")
+                to "SwapScreens takes no package",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"GoHome","screen":"TOP","package":"a.b"""",
+            ) to "GoHome takes no package",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"OpenApp","package":7,"screen":"TOP"""",
+            ) to "package is not a string",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"OpenApp","package":"nope","screen":"TOP"""",
+            ) to "The app must be named by its package name (got 'nope')",
         )
     )
+
+    @Test
+    fun `an OpenApp round-trips with its package and screen`() {
+        val open = swap.replace(
+            """"kind":"SwapScreens"""",
+            """"kind":"OpenApp","package":"org.dolphinemu.dolphinemu","screen":"FOCUSED"""",
+        )
+        val c = ok(file(open)).config
+        assertEquals(
+            Action.OpenApp("org.dolphinemu.dolphinemu", ScreenTarget.FOCUSED),
+            c.shortcuts.single().action,
+        )
+        val written = ConfigCodec.encode(c)
+        assertTrue("\"package\": \"org.dolphinemu.dolphinemu\"" in written, written)
+        assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+    }
 
     @Test
     fun `an entry without a usable id is dropped with a null id`() {
