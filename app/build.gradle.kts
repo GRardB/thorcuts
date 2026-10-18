@@ -4,10 +4,20 @@
 // Kotlin support since AGP 9.0." (https://kotl.in/gradle/agp-built-in-kotlin).
 // jvmTarget is likewise set via compileOptions below, not `kotlinOptions {}`,
 // which no longer exists without that plugin.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Release signing: a `keystore.properties` at the repo root names the keystore and its
+// passwords (keystore.properties.example lists the keys). Without the file the release build
+// is simply unsigned, and the debug build is untouched either way. The file and the keystore
+// are gitignored: a leaked key lets anyone ship an update over every install.
+val keystoreProperties: Properties? = rootProject.file("keystore.properties")
+    .takeIf { it.exists() }
+    ?.let { f -> Properties().apply { f.inputStream().use(::load) } }
 
 android {
     namespace = "com.grardb.thorcuts"
@@ -25,9 +35,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (keystoreProperties != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Signed when keystore.properties is present (above); unsigned otherwise.
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
