@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -159,8 +160,18 @@ private fun AppRow(
             )
         }
         when (picking) {
-            Picking.SCOPE_APPS -> Checkbox(checked = chosen, onCheckedChange = null)
-            Picking.OPEN_APP -> RadioButton(selected = chosen, onClick = null)
+            // No click of its own, so Material3 would skip its 48 dp box; the row is the
+            // target, and the control keeps the box so the row's height is what it was.
+            Picking.SCOPE_APPS -> Checkbox(
+                checked = chosen,
+                onCheckedChange = null,
+                modifier = Modifier.minimumInteractiveComponentSize(),
+            )
+            Picking.OPEN_APP -> RadioButton(
+                selected = chosen,
+                onClick = null,
+                modifier = Modifier.minimumInteractiveComponentSize(),
+            )
         }
     }
 }

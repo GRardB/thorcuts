@@ -740,6 +740,23 @@ class ThorcutsCoordinatorTest {
         }
 
     @Test
+    fun `a loaded file's drops are reported on the config line, each as its line`() {
+        val bad1 = """{"id":"bad1","trigger":{"modifiers":["AYN"],"buttons":[""" +
+            """{"device":"PAD","type":"KEY","code":308,"value":1}],"style":"PRESS"},""" +
+            """"action":{"kind":"Teleport"}}"""
+        val bad2 = """{"id":"bad2","trigger":{"modifiers":["AYN"],"buttons":[""" +
+            """{"device":"PAD","type":"KEY","code":305,"value":1}],"style":"PRESS"},""" +
+            """"action":{"kind":"Warp"}}"""
+        file.text = ONE_SHORTCUT_TEXT.replace("\n  ]\n}", ",\n$bad1,\n$bad2\n  ]\n}")
+        val c = coordinator()
+        assertEquals(
+            "config: 1 shortcut(s), 2 dropped: #1 bad1: unknown action kind 'Teleport'; " +
+                "#2 bad2: unknown action kind 'Warp'",
+            c.state.value.configState,
+        )
+    }
+
+    @Test
     fun `importFrom merges, reports every outcome with its reason, and pushes`() {
         val c = coordinator()
         c.setEnabled(true)

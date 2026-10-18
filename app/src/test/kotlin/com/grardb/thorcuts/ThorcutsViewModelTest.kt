@@ -32,6 +32,9 @@ import kotlin.test.assertNull
  * fixtures: what an import's two outcomes become on the screen — a report for the dialog, or
  * one line for the snackbar. Main is a test dispatcher (`viewModelScope`), the write scope and
  * the I/O dispatcher are Unconfined, so every step runs inline and the state is read after.
+ *
+ * Android-free only because the import path calls nothing in `android.*`; the edit paths
+ * (`Log.i`) would throw "not mocked" on the host, needing `isReturnDefaultValues` or a seam.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ThorcutsViewModelTest {

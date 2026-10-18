@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -299,7 +300,14 @@ private fun ChoiceRow(
             .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(
+            selected = selected,
+            onClick = null,
+            // No click of its own, so Material3 would skip its 48 dp box; the row is the
+            // target, and the control keeps the box so the row's height and the label's
+            // place are what they were.
+            modifier = Modifier.minimumInteractiveComponentSize(),
+        )
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
 }
