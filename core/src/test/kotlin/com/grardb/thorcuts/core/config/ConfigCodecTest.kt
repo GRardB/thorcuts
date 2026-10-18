@@ -5,6 +5,7 @@ import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Trigger
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -84,10 +85,17 @@ class ConfigCodecTest {
 
     @Test
     fun `encode then decode is the identity`() {
-        for (c in listOf(KITCHEN_SINK, ONE, ThorcutsConfig(emptyList()))) {
+        for (c in listOf(KITCHEN_SINK, ONE_SHORTCUT, ThorcutsConfig(emptyList()))) {
             val back = ConfigCodec.decode(ConfigCodec.encode(c))
             assertEquals(DecodeResult.Ok(c, emptyList(), null), back)
         }
+    }
+
+    @Test
+    fun `the one-shortcut fixture encodes to its golden text`() {
+        // The store tests compare a first-run write against this text, so the tie between
+        // the value and the bytes is pinned here, once, against a literal.
+        assertEquals(ONE_SHORTCUT_TEXT, ConfigCodec.encode(ONE_SHORTCUT))
     }
 
     // ── forgiveness ───────────────────────────────────────────────────────────────────
@@ -213,15 +221,42 @@ class ConfigCodecTest {
     }
 
     @Test
-    fun `a chain that cannot run is a Failed with the reason`() {
+    fun `a hole in the migration chain is a Failed naming the gap`() {
         val hole = ConfigCodec.decode(underRules, Migrations(emptyMap()), current = 2)
         val h = assertIs<DecodeResult.Failed>(hole)
         assertTrue("no migration from schema version 1 to 2" in h.reason, h.reason)
+    }
+
+    @Test
+    fun `a migration step that throws is a Failed with its message`() {
         // A step's own `require` is an IllegalArgumentException: this file's failure too, not
         // a throw out of a method whose contract is "never throws on input" (T2-1).
         val boom: (JsonObject) -> JsonObject = { throw IllegalArgumentException("boom") }
         val r = ConfigCodec.decode(underRules, Migrations(mapOf(1 to boom)), current = 2)
         assertEquals(DecodeResult.Failed("boom"), r)
+    }
+
+    @Test
+    fun `a migration step that throws without a message is a Failed naming its type`() {
+        // A step bug (an NPE, a bad cast) must read differently from a bad file.
+        val bug: (JsonObject) -> JsonObject = { throw NullPointerException() }
+        val r = ConfigCodec.decode(underRules, Migrations(mapOf(1 to bug)), current = 2)
+        assertEquals(DecodeResult.Failed("migration failed (NullPointerException)"), r)
+    }
+
+    @Test
+    fun `a parse failure reads the parser's first line, or unparseable when it has none`() {
+        val twoLines = SerializationException("Unexpected JSON token\nJSON input: nope")
+        assertEquals("not JSON: Unexpected JSON token", ConfigCodec.parseFailure(twoLines))
+        assertEquals("not JSON: unparseable", ConfigCodec.parseFailure(SerializationException("")))
+        assertEquals("not JSON: unparseable", ConfigCodec.parseFailure(SerializationException()))
+    }
+
+    @Test
+    fun `a dropped entry's line is its index, id and reason`() {
+        val d = Dropped(3, "bad", "unknown action kind 'Teleport'")
+        assertEquals("#3 bad: unknown action kind 'Teleport'", d.line)
+        assertEquals("#0 ?: not an object", Dropped(0, null, "not an object").line)
     }
 
     // ── per-shortcut drops ────────────────────────────────────────────────────────────

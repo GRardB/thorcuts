@@ -24,12 +24,12 @@ class ConfigStoreTest {
 
     /** Unconfined: every call runs inline on the test thread, in order, so the test reads
      *  plain lists afterwards. The real dispatcher gets its own test at the end. */
-    private fun store(default: ThorcutsConfig = ONE) =
+    private fun store(default: ThorcutsConfig = ONE_SHORTCUT) =
         ConfigStore(file, pushed::add, events::add, default, Dispatchers.Unconfined)
 
     private inline fun <reified E : Event> only(): E = events.filterIsInstance<E>().single()
     private fun pushedGens() = pushed.map { it.generation }
-    private val defaultText = ConfigCodec.encode(ONE)
+    private val defaultText = ONE_SHORTCUT_TEXT
     private val swapOff: (ThorcutsConfig) -> ThorcutsConfig =
         { it.withEnabled("swap-screens", false) }
     private val swapOn: (ThorcutsConfig) -> ThorcutsConfig =
@@ -51,8 +51,8 @@ class ConfigStoreTest {
         assertTrue(s.config.value.shortcuts.isEmpty())
         runBlocking { s.load() }
         assertEquals(listOf(defaultText), file.writes)
-        assertEquals(ONE, s.config.value)
-        val loaded = Event.Loaded(ONE, true, emptyList(), null, null)
+        assertEquals(ONE_SHORTCUT, s.config.value)
+        val loaded = Event.Loaded(ONE_SHORTCUT, true, emptyList(), null, null)
         assertEquals(loaded, only<Event.Loaded>())
         assertTrue(pushed.isEmpty())
     }
@@ -65,7 +65,7 @@ class ConfigStoreTest {
         runBlocking { s.load() }               // would write the default a second time
         assertEquals(1, file.writes.size)
         assertEquals(1, events.size)
-        assertEquals(ONE, s.config.value)
+        assertEquals(ONE_SHORTCUT, s.config.value)
     }
 
     @Test
@@ -76,7 +76,7 @@ class ConfigStoreTest {
         val loaded = only<Event.Loaded>()
         assertFalse(loaded.created)
         assertEquals("could not write the default: ENOSPC", loaded.failure)
-        assertEquals(ONE, s.config.value)   // memory is published either way
+        assertEquals(ONE_SHORTCUT, s.config.value)   // memory is published either way
         assertTrue(file.writes.isEmpty())
     }
 
@@ -117,7 +117,7 @@ class ConfigStoreTest {
         assertEquals(listOf("nope"), file.setAsides)
         assertEquals(listOf(defaultText), file.writes)
         assertEquals(defaultText, file.text)
-        assertEquals(ONE, s.config.value)
+        assertEquals(ONE_SHORTCUT, s.config.value)
         val loaded = only<Event.Loaded>()
         assertTrue(loaded.created)
         assertEquals("config.json.bad-1", loaded.setAside)
@@ -140,11 +140,11 @@ class ConfigStoreTest {
         val stuck = object : InMemoryConfigFile("nope") {
             override fun setAside(): String? = throw IOException("read-only")
         }
-        val s = ConfigStore(stuck, pushed::add, events::add, ONE, Dispatchers.Unconfined)
+        val s = ConfigStore(stuck, pushed::add, events::add, ONE_SHORTCUT, Dispatchers.Unconfined)
         runBlocking { s.load() }
         assertEquals("nope", stuck.text)
         assertTrue(stuck.writes.isEmpty())
-        assertEquals(ONE, s.config.value)
+        assertEquals(ONE_SHORTCUT, s.config.value)
         val loaded = only<Event.Loaded>()
         assertFalse(loaded.created)
         assertNull(loaded.setAside)
@@ -182,7 +182,7 @@ class ConfigStoreTest {
         s.helperReady()
         assertEquals(listOf(1), pushedGens())
         val outcome = runBlocking { s.update(swapOff) }
-        val expected = UpdateOutcome.Applied(ONE.withEnabled("swap-screens", false))
+        val expected = UpdateOutcome.Applied(ONE_SHORTCUT.withEnabled("swap-screens", false))
         assertEquals(expected, outcome)
         assertFalse(s.config.value.shortcut("swap-screens")!!.enabled)
         assertTrue("\"enabled\": false" in file.text!!)
@@ -413,7 +413,7 @@ class ConfigStoreTest {
     fun `a push that throws is reported as Failed and the store stays usable`() {
         val s = ConfigStore(
             file, push = { throw IllegalStateException("boom") }, onEvent = events::add,
-            default = ONE, dispatcher = Dispatchers.Unconfined,
+            default = ONE_SHORTCUT, dispatcher = Dispatchers.Unconfined,
         )
         runBlocking { s.load() }
         s.helperReady()
@@ -436,7 +436,7 @@ class ConfigStoreTest {
                 events += e
                 if (e is Event.TablePushed) throw IllegalStateException("handler boom")
             },
-            default = ONE, dispatcher = Dispatchers.Unconfined,
+            default = ONE_SHORTCUT, dispatcher = Dispatchers.Unconfined,
         )
         runBlocking { s.load() }
         s.helperReady()
@@ -538,7 +538,7 @@ class ConfigStoreTest {
         s.foreground(DOLPHIN)
         val failed = only<Event.PushFailed>()
         assertEquals(2, failed.generation)
-        assertEquals("65 shortcuts apply here; the table holds at most 64", failed.reason)
+        assertEquals("65 shortcuts apply in $DOLPHIN; the table holds at most 64", failed.reason)
         assertEquals(listOf(1), pushedGens())                   // the helper keeps gen 1
         s.foreground(RETROARCH)                                 // the global list: what it holds
         assertEquals(listOf(1), pushedGens())
@@ -598,7 +598,7 @@ class ConfigStoreTest {
     fun `calls from different threads are applied in call order on the real dispatcher`() {
         val liveEvents = CopyOnWriteArrayList<Event>()
         val livePushed = CopyOnWriteArrayList<CompiledTable>()
-        val s = ConfigStore(InMemoryConfigFile(), livePushed::add, liveEvents::add, ONE)
+        val s = ConfigStore(InMemoryConfigFile(), livePushed::add, liveEvents::add, ONE_SHORTCUT)
         runBlocking { s.load() }
         s.helperReady()                                   // gen 1, 1 rule
         runBlocking { s.update(swapOff) }                 // gen 2, 0 rules

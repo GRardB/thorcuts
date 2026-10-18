@@ -45,7 +45,12 @@ sealed interface DecodeResult {
 }
 
 /** One shortcut the decoder could not accept. [id] is null when the entry had no usable id. */
-data class Dropped(val index: Int, val id: String?, val reason: String)
+data class Dropped(val index: Int, val id: String?, val reason: String) {
+    /** `#3 bad: unknown action kind 'Teleport'` — the one text for every report that lists
+     *  drops (the load's config line, the import's). */
+    val line: String
+        get() = "#$index ${id ?: "?"}: $reason"
+}
 
 /**
  * JSON in and out for [ThorcutsConfig] (parent spec §10; layout in the config spec, "The file").
@@ -90,8 +95,7 @@ object ConfigCodec {
         val root = try {
             Json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            val detail = e.message?.lineSequence()?.first() ?: "unparseable"
-            return DecodeResult.Failed("not JSON: $detail")
+            return DecodeResult.Failed(parseFailure(e))
         }
         val raw = root as? JsonObject
             ?: return DecodeResult.Failed("the top level is not an object")
@@ -112,7 +116,9 @@ object ConfigCodec {
                 // A hole in the chain is an IllegalStateException; a step's own `require` an
                 // IllegalArgumentException. Either is this file's failure, not a throw out of
                 // a method whose contract is "never throws on input" (T2-1).
-                return DecodeResult.Failed(e.message ?: "migration failed")
+                return DecodeResult.Failed(
+                    e.message ?: "migration failed (${e::class.simpleName})"
+                )
             }
         }
         val entries = doc[SHORTCUTS_KEY] as? JsonArray
@@ -309,8 +315,19 @@ object ConfigCodec {
     private inline fun <reified E : Enum<E>> JsonObject.enum(key: String): E =
         member(key).asEnum<E>(key)
 
+    /** The parser's first line after `not JSON: `, or `unparseable` when it says nothing —
+     *  never the bare prefix. */
+    internal fun parseFailure(e: SerializationException): String {
+        val detail = e.message?.lineSequence()?.first()?.takeIf { it.isNotBlank() }
+        return "not JSON: ${detail ?: "unparseable"}"
+    }
+
     /** An integer written as a number — `"307"` is a string, and is refused. */
     private fun JsonPrimitive.plainInt(): Int? = if (isString) null else intOrNull
+
+    /** The same rule, Long-wide: what `asInt` asks to tell "out of range" from "not an
+     *  integer". */
+    private fun JsonPrimitive.plainLong(): Long? = if (isString) null else longOrNull
 
     private fun JsonElement.asString(key: String): String =
         (this as? JsonPrimitive)?.takeIf { it.isString }?.content ?: fail("$key is not a string")
@@ -320,8 +337,7 @@ object ConfigCodec {
     private fun JsonElement.asInt(key: String): Int {
         val p = this as? JsonPrimitive
         return p?.plainInt() ?: fail(
-            if (p != null && !p.isString && p.longOrNull != null) "$key is out of range"
-            else "$key is not an integer"
+            if (p?.plainLong() != null) "$key is out of range" else "$key is not an integer"
         )
     }
 

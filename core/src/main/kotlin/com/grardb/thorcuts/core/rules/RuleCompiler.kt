@@ -35,9 +35,7 @@ object RuleCompiler {
     /** [select], then encode. The caller owns [generation]: whoever decides to recompile. */
     fun compile(shortcuts: List<Shortcut>, foreground: String?, generation: Int): CompiledTable {
         val selected = select(shortcuts, foreground)
-        require(selected.size <= MAX_RULES) {
-            "${selected.size} shortcuts apply here; the table holds at most $MAX_RULES"
-        }
+        require(selected.size <= MAX_RULES) { overflow(selected.size, foreground) }
         val bytes = RuleTableFormat.encode(selected.map { it.trigger }, generation)
         return CompiledTable(generation, selected, bytes)
     }
@@ -59,10 +57,13 @@ object RuleCompiler {
         }.toSortedSet()
         for (where in listOf<String?>(null) + named) {
             val n = select(shortcuts, where).size
-            require(n <= MAX_RULES) {
-                "$n shortcuts apply ${if (where == null) "here" else "in $where"}; " +
-                    "the table holds at most $MAX_RULES"
-            }
+            require(n <= MAX_RULES) { overflow(n, where) }
         }
     }
+
+    /** The refusal [compile] and [check] share, naming the app when there is one: a loaded
+     *  file can overflow for the app in front, and the status line must say which. */
+    private fun overflow(n: Int, where: String?) =
+        "$n shortcuts apply ${if (where == null) "here" else "in $where"}; " +
+            "the table holds at most $MAX_RULES"
 }

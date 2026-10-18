@@ -14,45 +14,78 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/** A golden fixture from fixtures/config/, as text. */
-internal fun configFixture(name: String): String {
-    val loader = Thread.currentThread().contextClassLoader
-    val stream = checkNotNull(loader.getResourceAsStream("config/$name")) {
-        "fixture config/$name is missing from the test classpath; is ../fixtures a resource dir?"
-    }
-    return stream.use { it.readBytes().toString(Charsets.UTF_8) }
-}
+// Shared test material (java-test-fixtures): on the test classpath of :core, :platform and
+// :app. Public, since a fixtures source set is its own module to the compiler. The golden
+// files under fixtures/config/ are read by :core's own tests (`configFixture`); these are the
+// values those files mean.
 
-internal const val DOLPHIN = "org.dolphinemu.dolphinemu"
-internal const val RETROARCH = "com.retroarch.aarch64"
+const val DOLPHIN = "org.dolphinemu.dolphinemu"
+const val RETROARCH = "com.retroarch.aarch64"
 
 /** Thorcuts' own package: what the fixtures' open shortcuts open. */
-internal const val THORCUTS = "com.grardb.thorcuts"
+const val THORCUTS = "com.grardb.thorcuts"
 
-internal fun padKey(code: Int) = Control(Device.PAD, EvdevType.KEY, code, 1)
+fun padKey(code: Int) = Control(Device.PAD, EvdevType.KEY, code, 1)
 
 /** BTN_NORTH — the X button on the Thor's pad (M1 findings, control table). */
-internal val X = padKey(307)
+val BUTTON_X = padKey(307)
 
 /**
  * M1's rule — HOLD 400 · AYN + X → swap the screens — the shipped default until M5 emptied
- * it. Test material now: the actions run, the merge, store and config tests derive their
- * shortcuts from it, and `RuleCompilerTest` pins `m1-swap.bin` with it.
+ * it. Test material now: the actions run, the merge, store, config and coordinator tests
+ * derive their shortcuts from it, and `RuleCompilerTest` pins `m1-swap.bin` with it.
  */
-internal val SWAP_SCREENS = Shortcut(
+val SWAP_SCREENS = Shortcut(
     id = "swap-screens",
     trigger = Trigger(
         modifiers = setOf(ModifierKey.AYN),
-        buttons = setOf(X),
+        buttons = setOf(BUTTON_X),
         style = TriggerStyle.HOLD,
         holdMs = 400,
     ),
     action = Action.SwapScreens,
 )
 
-/** A one-shortcut default for the store tests: the store's `default` is a constructor
- *  parameter, and the tests exercise a default with content. */
-internal val ONE = ThorcutsConfig(listOf(SWAP_SCREENS))
+/** A config with content — [SWAP_SCREENS] alone — for any test that needs one: the store's
+ *  default, the codec's identity loop, the coordinator's seeded file. */
+val ONE_SHORTCUT = ThorcutsConfig(listOf(SWAP_SCREENS))
+
+/** [ONE_SHORTCUT] as the encoder writes it, as a literal: `ConfigCodecTest` pins the tie, and
+ *  the store tests compare a first-run write against this text rather than against the
+ *  encoder under test. */
+val ONE_SHORTCUT_TEXT: String = """
+{
+  "schemaVersion": 1,
+  "shortcuts": [
+    {
+      "id": "swap-screens",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 307,
+            "value": 1
+          }
+        ],
+        "style": "HOLD",
+        "holdMs": 400
+      },
+      "action": {
+        "kind": "SwapScreens"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
+    }
+  ]
+}
+""".removePrefix("\n")
 
 /** A PRESS shortcut on AYN + one button, enabled, global: the actions run's shape. */
 private fun press(id: String, button: Control, action: Action) =
@@ -64,7 +97,7 @@ private fun press(id: String, button: Control, action: Action) =
  * screen target that run exercises. The actions spec's table is the source; this is it
  * as code, and the file is this value as the encoder writes it.
  */
-internal val ACTIONS_RUN = ThorcutsConfig(
+val ACTIONS_RUN = ThorcutsConfig(
     shortcuts = listOf(
         SWAP_SCREENS,
         press("close-focused", padKey(304), Action.CloseScreen(ScreenTarget.FOCUSED)),
@@ -87,7 +120,7 @@ internal val ACTIONS_RUN = ThorcutsConfig(
  * scopes, a bare modifier, four buttons, an ABS control at −1, two modifiers, a disabled
  * shortcut, and an unknown member at each preserved level.
  */
-internal val KITCHEN_SINK = ThorcutsConfig(
+val KITCHEN_SINK = ThorcutsConfig(
     shortcuts = listOf(
         Shortcut(
             id = "close-in-emulators",

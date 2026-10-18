@@ -99,6 +99,7 @@ object ConflictDetector {
     private fun apps(included: Set<String>): Scope? =
         if (included.isEmpty()) null else Scope.Apps(included)
 
-    /** §6's gameplay modifiers: the two a game reads as buttons of its own. */
-    private val GAMEPLAY = setOf(ModifierKey.START, ModifierKey.SELECT)
+    /** §6's gameplay modifiers: the two a game reads as buttons of its own. The editor's note
+     *  about a plain tap reaching the game late keys off the same two. */
+    val GAMEPLAY: Set<ModifierKey> = setOf(ModifierKey.START, ModifierKey.SELECT)
 }

@@ -1,7 +1,7 @@
 package com.grardb.thorcuts.core.rules
 
 import com.grardb.thorcuts.core.config.SWAP_SCREENS
-import com.grardb.thorcuts.core.config.X
+import com.grardb.thorcuts.core.config.BUTTON_X
 import com.grardb.thorcuts.core.model.Action
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
@@ -79,7 +79,7 @@ class RuleCompilerTest {
         Shortcut(
             id = "m1-swap-screens",
             trigger = Trigger(
-                setOf(ModifierKey.AYN), setOf(X), TriggerStyle.HOLD, holdMs = 400,
+                setOf(ModifierKey.AYN), setOf(BUTTON_X), TriggerStyle.HOLD, holdMs = 400,
             ),
             action = Action.SwapScreens,
         ),
@@ -127,10 +127,24 @@ class RuleCompilerTest {
     @Test
     fun `more than sixty-four applicable rules are refused`() {
         val many = (0 until 65).map { shortcut("s$it", Scope.Global(), code = 512 + it) }
-        assertFailsWith<IllegalArgumentException> { RuleCompiler.compile(many, null, 1) }
+        val e = assertFailsWith<IllegalArgumentException> { RuleCompiler.compile(many, null, 1) }
+        assertEquals("65 shortcuts apply here; the table holds at most 64", e.message)
         // Scoping can bring it under the limit: 65 shortcuts, 64 applicable, is fine.
         val one = many.take(64) + shortcut("elsewhere", Scope.Apps(setOf(dolphin)), code = 600)
         assertEquals(64, RuleCompiler.compile(one, null, 1).ruleCount)
+    }
+
+    @Test
+    fun `compile names the app whose list overflows`() {
+        // A loaded file can overflow for the app in front (an edit cannot: `check`); the
+        // store's PushFailed carries this text to the status line, so it names the app.
+        val many = (0 until 65).map {
+            shortcut("d$it", Scope.Apps(setOf(dolphin)), code = 512 + it)
+        }
+        val e = assertFailsWith<IllegalArgumentException> {
+            RuleCompiler.compile(many, dolphin, 1)
+        }
+        assertEquals("65 shortcuts apply in $dolphin; the table holds at most 64", e.message)
     }
 
     @Test

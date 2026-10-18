@@ -149,6 +149,5 @@ class ThorcutsConfigTest {
     @Test
     fun `the default is empty`() {
         assertEquals(ThorcutsConfig(emptyList()), Defaults.CONFIG)
-        assertTrue(Defaults.CONFIG.unknown.isEmpty)
     }
 }

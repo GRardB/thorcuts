@@ -2,8 +2,10 @@ package com.grardb.thorcuts.core.config
 
 import java.io.IOException
 
-/** A [ConfigFile] in memory. One slot of text; set-asides are counted and their text kept. */
-internal open class InMemoryConfigFile(var text: String? = null) : ConfigFile {
+/** A [ConfigFile] in memory: one slot of text, the writes kept, set-asides counted and their
+ *  text kept, and a failure to inject on either side. The store's tests and the coordinator's
+ *  (a file, not a file system) share it. */
+open class InMemoryConfigFile(var text: String? = null) : ConfigFile {
     val writes = mutableListOf<String>()
     val setAsides = mutableListOf<String>()
     var readFailure: IOException? = null

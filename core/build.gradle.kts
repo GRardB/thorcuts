@@ -1,5 +1,8 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    // src/testFixtures: the config fixtures and the in-memory file, shared with :platform's
+    // and :app's tests (`testImplementation(testFixtures(project(":core")))`).
+    id("java-test-fixtures")
 }
 
 kotlin {
@@ -35,6 +38,9 @@ dependencies {
     // `implementation`: StateFlow and CoroutineDispatcher are in its public signature, so a
     // consumer must compile against the same artifact, not whatever lifecycle drags in.
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+
+    // The fixtures build a JSON tree for the kitchen-sink config's unknown members.
+    testFixturesImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
