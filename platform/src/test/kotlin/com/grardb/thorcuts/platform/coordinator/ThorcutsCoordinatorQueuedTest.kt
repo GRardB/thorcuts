@@ -1,7 +1,7 @@
 package com.grardb.thorcuts.platform.coordinator
 
+import com.grardb.thorcuts.core.config.InMemoryConfigFile
 import com.grardb.thorcuts.core.helper.HelperMessage
-import com.grardb.thorcuts.platform.config.MemoryConfigFile
 import com.grardb.thorcuts.platform.helper.FakeChannel
 import com.grardb.thorcuts.platform.helper.HelperChannel
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
@@ -20,6 +20,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -45,7 +46,7 @@ class ThorcutsCoordinatorQueuedTest {
 
     /** The store's own scheduler, for the one test that parks an attempt at store.load(). */
     private val storeScheduler = TestCoroutineScheduler()
-    private val file = MemoryConfigFile()
+    private val file = InMemoryConfigFile()
     private val switch = FakeSwitch()
     private val held = mutableListOf<Boolean>()
     private val log = RecordingLogger()
@@ -212,6 +213,23 @@ class ThorcutsCoordinatorQueuedTest {
         assertEquals(listOf("start"), channel.calls)            // no start after the OFF
         assertEquals(listOf(true, false), held)                 // and no second release
         assertFalse(c.state.value.running)
+    }
+
+    @Test
+    fun `an export before the load is refused, and after it exports`() {
+        // The load is queued at construction; until it runs the store holds the empty default,
+        // and an export then would write an empty config over the user's file.
+        val c = coordinator()
+        var written: String? = null
+        assertEquals("export failed: the config has not loaded yet", c.exportTo { written = it })
+        assertNull(written)
+        assertEquals(
+            "config: export failed: the config has not loaded yet", c.state.value.configState,
+        )
+        assertTrue(log.has("CONFIG_EXPORT_FAILED the config has not loaded yet"))
+        drain()                                                 // the load
+        assertEquals("exported 0 shortcut(s)", c.exportTo { written = it })
+        assertNotNull(written)
     }
 
     @Test

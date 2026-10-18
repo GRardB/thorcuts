@@ -1,8 +1,13 @@
 package com.grardb.thorcuts.platform.coordinator
 
+import com.grardb.thorcuts.core.config.BUTTON_X
 import com.grardb.thorcuts.core.config.ConfigCodec
 import com.grardb.thorcuts.core.config.ConfigStore.UpdateOutcome
+import com.grardb.thorcuts.core.config.InMemoryConfigFile
+import com.grardb.thorcuts.core.config.ONE_SHORTCUT_TEXT
+import com.grardb.thorcuts.core.config.SWAP_SCREENS
 import com.grardb.thorcuts.core.config.ThorcutsConfig
+import com.grardb.thorcuts.core.config.padKey
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
 import com.grardb.thorcuts.core.model.Control
@@ -13,10 +18,8 @@ import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.model.Shortcut
 import com.grardb.thorcuts.core.model.Trigger
-import com.grardb.thorcuts.core.model.TriggerStyle
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.RuleCompiler
-import com.grardb.thorcuts.platform.config.MemoryConfigFile
 import com.grardb.thorcuts.platform.helper.FakeChannel
 import com.grardb.thorcuts.platform.helper.HelperChannel
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
@@ -45,19 +48,10 @@ import kotlin.test.assertTrue
  */
 class ThorcutsCoordinatorTest {
 
-    /** BTN_NORTH — the X button on the Thor's pad. */
-    private val x = Control(Device.PAD, EvdevType.KEY, 307, 1)
-
-    /** M1's rule, HOLD 400 · AYN + X → swap the screens: the shipped default until M5 emptied
-     *  it, so the file these tests start from carries it explicitly (one global rule). The
-     *  construction test alone starts with no file and sees the empty default written. */
-    private val swap = Shortcut(
-        id = "swap-screens",
-        trigger = Trigger(setOf(ModifierKey.AYN), setOf(x), TriggerStyle.HOLD, holdMs = 400),
-        action = Action.SwapScreens,
-    )
-
-    private val file = MemoryConfigFile(ConfigCodec.encode(ThorcutsConfig(listOf(swap))))
+    /** The file these tests start from carries :core's one-shortcut fixture (M1's swap, one
+     *  global rule) explicitly. The construction test alone starts with no file and sees the
+     *  empty default written. */
+    private val file = InMemoryConfigFile(ONE_SHORTCUT_TEXT)
     private val switch = FakeSwitch()
     private val held = mutableListOf<Boolean>()
     private val log = RecordingLogger()
@@ -491,14 +485,14 @@ class ThorcutsCoordinatorTest {
     /** A coordinator whose config is the swap (global) plus one shortcut only in Dolphin:
      *  the global list is one rule, Dolphin's is two. */
     private fun scopedCoordinator(): ThorcutsCoordinator {
-        val onlyDolphin = swap.copy(
+        val onlyDolphin = SWAP_SCREENS.copy(
             id = "only-d",
-            trigger = swap.trigger.copy(
+            trigger = SWAP_SCREENS.trigger.copy(
                 buttons = setOf(Control(Device.PAD, EvdevType.KEY, 304, 1)),
             ),
             scope = Scope.Apps(setOf(dolphin)),
         )
-        file.text = ConfigCodec.encode(ThorcutsConfig(listOf(swap, onlyDolphin)))
+        file.text = ConfigCodec.encode(ThorcutsConfig(listOf(SWAP_SCREENS, onlyDolphin)))
         return coordinator()
     }
 
@@ -641,13 +635,13 @@ class ThorcutsCoordinatorTest {
         val before = c.state.value
         channel.emit(key(1, 194, 1))                            // AYN, on gpio-keys
         channel.emit(key(0, 307, 1))                            // X
-        assertEquals(setOf(ModifierKey.AYN.control, x), c.recording.value!!.held)
+        assertEquals(setOf(ModifierKey.AYN.control, BUTTON_X), c.recording.value!!.held)
         channel.emit(key(0, 307, 0))
         channel.emit(key(1, 194, 0))
         val r = assertNotNull(c.recording.value)
         assertTrue(r.complete)
         assertEquals(setOf(ModifierKey.AYN), r.modifiers)
-        assertEquals(setOf(x), r.buttons)
+        assertEquals(setOf(BUTTON_X), r.buttons)
         // The recording stays until the UI ends it; a raw event touches the recorder and
         // nothing else — not a row, not a line of the state.
         assertEquals(listOf("start", "capture on"), channel.calls)
@@ -718,8 +712,8 @@ class ThorcutsCoordinatorTest {
     // ── import and export ─────────────────────────────────────────────────────────────
 
     /** BTN_WEST — the Y button; BTN_EAST — the B button. */
-    private val y = Control(Device.PAD, EvdevType.KEY, 308, 1)
-    private val b = Control(Device.PAD, EvdevType.KEY, 305, 1)
+    private val y = padKey(308)
+    private val b = padKey(305)
 
     /** AYN + Y, a tap → go home on the focused screen: a trigger the seeded file lacks. */
     private val home = Shortcut(
@@ -737,8 +731,8 @@ class ThorcutsCoordinatorTest {
      */
     private val importFile: String
         get() {
-            val present = swap.copy(trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
-            val sameTrigger = swap.copy(id = "swap2")
+            val present = SWAP_SCREENS.copy(trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
+            val sameTrigger = SWAP_SCREENS.copy(id = "swap2")
             val valid = ConfigCodec.encode(ThorcutsConfig(listOf(home, present, sameTrigger)))
             val bad = """{"id":"bad","trigger":{"modifiers":["AYN"],"style":"PRESS"},""" +
                 """"action":{"kind":"Teleport"}}"""
@@ -770,7 +764,9 @@ class ThorcutsCoordinatorTest {
     @Test
     fun `an import with nothing skipped or dropped reports plain counts`() {
         val c = coordinator()
-        val only = swap.copy(id = "b-only", trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)))
+        val only = SWAP_SCREENS.copy(
+            id = "b-only", trigger = Trigger(setOf(ModifierKey.AYN), setOf(b)),
+        )
         val returned =
             runBlocking { c.importFrom { ConfigCodec.encode(ThorcutsConfig(listOf(only))) } }
         assertEquals(
@@ -810,10 +806,30 @@ class ThorcutsCoordinatorTest {
         val c = coordinator()
         var written: String? = null
         val returned = c.exportTo { written = it }
-        assertEquals(ConfigCodec.encode(ThorcutsConfig(listOf(swap))), written)
+        assertEquals(ONE_SHORTCUT_TEXT, written)
         assertEquals("config: exported 1 shortcut(s)", c.state.value.configState)
         assertEquals("exported 1 shortcut(s)", returned)
         assertTrue(log.has("CONFIG_EXPORT shortcuts=1"))
+    }
+
+    @Test
+    fun `an import that would overflow the table is refused and nothing is written`() {
+        val c = coordinator()
+        val many = (0 until 65).map { i ->
+            SWAP_SCREENS.copy(
+                id = "s$i", trigger = Trigger(setOf(ModifierKey.AYN), setOf(padKey(400 + i))),
+            )
+        }
+        val returned =
+            runBlocking { c.importFrom { ConfigCodec.encode(ThorcutsConfig(many)) } }
+        // The merge adds all 65 to the seeded one; the store's check refuses the 66 and the
+        // import reports that as its own failure, not a "write rejected" of the Save path.
+        val reason = "66 shortcuts apply here; the table holds at most 64"
+        assertEquals(ImportOutcome.Failed("import failed: $reason"), returned)
+        assertEquals("config: import failed: $reason", c.state.value.configState)
+        assertTrue(file.writes.isEmpty())
+        assertEquals(listOf("swap-screens"), c.config.value.shortcuts.map { it.id })
+        assertTrue(log.has("CONFIG_IMPORT_FAILED $reason"))
     }
 
     @Test

@@ -102,8 +102,8 @@ sealed interface ImportOutcome {
      *  (with reasons). */
     data class Merged(val result: MergeResult) : ImportOutcome
 
-    /** The outcome line without its `config: ` prefix: `import failed: …` (a read that threw,
-     *  a file that failed to decode) or `write rejected: …` (the store refused the merge). */
+    /** The outcome line without its `config: ` prefix: `import failed: …` — a read that
+     *  threw, a file that failed to decode, or a merge the store refused (an overflow). */
     data class Failed(val line: String) : ImportOutcome
 }
 
@@ -196,6 +196,11 @@ class ThorcutsCoordinator(
 
     private val _state = MutableStateFlow(CoordinatorState(enabled = switch.read()))
     val state: StateFlow<CoordinatorState> = _state.asStateFlow()
+
+    /** Set once the store has read the file. Before that the store holds the empty default,
+     *  and an export would write it over the user's file. Written on the store's thread,
+     *  read on the exporter's. */
+    @Volatile private var loaded = false
 
     private val _recording = MutableStateFlow<TriggerRecorder?>(null)
 
@@ -341,21 +346,26 @@ class ThorcutsCoordinator(
      * Export: the current config, encoded, handed to [write] — the ViewModel's write into the
      * file the user picked (parent §10: "export is the file"). The outcome goes to the config
      * line and is returned, for the snackbar. [write] is foreign I/O, so whatever it throws
-     * becomes that line and not a crash (the store treats the edit lambda the same way). Call
-     * off main; the ViewModel does.
+     * becomes that line and not a crash (the store treats the edit lambda the same way).
+     * Refused before the first load, when the store still holds the empty default. Call off
+     * main; the ViewModel does.
      */
     fun exportTo(write: (String) -> Unit): String {
+        if (!loaded) return exportFailed("the config has not loaded yet")
         val config = store.config.value
         try {
             write(ConfigCodec.encode(config))
         } catch (e: Exception) {
-            val reason = e.message ?: e.toString()
-            log.w("CONFIG_EXPORT_FAILED $reason")
-            return configLine("export failed: $reason")
+            return exportFailed(e.message ?: e.toString())
         }
         val n = config.shortcuts.size
         log.i("CONFIG_EXPORT shortcuts=$n")
         return configLine("exported $n shortcut(s)")
+    }
+
+    private fun exportFailed(reason: String): String {
+        log.w("CONFIG_EXPORT_FAILED $reason")
+        return configLine("export failed: $reason")
     }
 
     /**
@@ -364,15 +374,16 @@ class ThorcutsCoordinator(
      * write between the pick and the merge is not lost — and reported on the config line:
      * what was added, skipped and dropped, each with its reason. A read that throws or a file
      * that fails to decode is reported and writes nothing; a write the store refuses (an
-     * overflow) keeps [update]'s own "write rejected" line. The report lands after the store's
-     * "written" line, which `update` sets before it returns. The outcome is also returned in
-     * its structured form ([ImportOutcome]) for the app's report dialog. Call off main.
+     * overflow) is a failed import with the store's reason. The report lands after the
+     * store's "written" line, which `update` sets before it returns. The outcome is also
+     * returned in its structured form ([ImportOutcome]) for the app's report dialog. Call
+     * off main.
      */
     suspend fun importFrom(read: () -> String): ImportOutcome {
         val text = try {
             read()
         } catch (e: Exception) {
-            return importFailed("could not read: ${e.message ?: e}")
+            return importFailed("could not read: ${e.message ?: e.toString()}")
         }
         val decoded = when (val d = ConfigCodec.decode(text)) {
             is DecodeResult.Failed -> return importFailed(d.reason)
@@ -382,16 +393,18 @@ class ThorcutsCoordinator(
         val outcome = update { current ->
             ConfigMerge.merge(current, decoded).also { result = it }.config
         }
-        if (outcome is ConfigStore.UpdateOutcome.Rejected) {
-            return ImportOutcome.Failed("write rejected: ${outcome.reason}")
+        return when (outcome) {
+            is ConfigStore.UpdateOutcome.Rejected -> importFailed(outcome.reason)
+            is ConfigStore.UpdateOutcome.Applied -> {
+                val r = checkNotNull(result) { "Applied, so the edit ran" }
+                log.i(
+                    "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
+                        "dropped=${r.dropped.size}"
+                )
+                configLine(importLine(r))   // the line only: the screen's report is the dialog's
+                ImportOutcome.Merged(r)
+            }
         }
-        val r = checkNotNull(result) { "Applied, so the edit ran" }
-        log.i(
-            "CONFIG_IMPORT added=${r.added.size} skipped=${r.skipped.size} " +
-                "dropped=${r.dropped.size}"
-        )
-        configLine(importLine(r))   // the line only: the screen's report is the dialog's
-        return ImportOutcome.Merged(r)
     }
 
     private fun importFailed(reason: String): ImportOutcome.Failed {
@@ -400,8 +413,8 @@ class ThorcutsCoordinator(
     }
 
     /** `N shortcut(s), imported: a added, s skipped (id: reason; …), d dropped (#i id:
-     *  reason; …)` — a parenthesis only when its count is non-zero; a drop as the load report
-     *  formats one. [configLine] adds the prefix. */
+     *  reason; …)` — a parenthesis only when its count is non-zero; a drop is its
+     *  `Dropped.line`, as the load report writes one. [configLine] adds the prefix. */
     private fun importLine(r: MergeResult): String = buildString {
         append("${r.config.shortcuts.size} shortcut(s), imported: ")
         append("${r.added.size} added, ${r.skipped.size} skipped")
@@ -410,9 +423,7 @@ class ThorcutsCoordinator(
         }
         append(", ${r.dropped.size} dropped")
         if (r.dropped.isNotEmpty()) {
-            append(r.dropped.joinToString("; ", " (", ")") { d ->
-                "#${d.index} ${d.id ?: "?"}: ${d.reason}"
-            })
+            append(r.dropped.joinToString("; ", " (", ")") { it.line })
         }
     }
 
@@ -775,6 +786,7 @@ class ThorcutsCoordinator(
     private fun onConfigEvent(event: ConfigStore.Event) {
         when (event) {
             is ConfigStore.Event.Loaded -> {
+                loaded = true
                 val n = event.config.shortcuts.size
                 log.i(
                     "CONFIG_LOAD created=${event.created} shortcuts=$n " +
@@ -786,9 +798,7 @@ class ThorcutsCoordinator(
                     if (event.created) append(", default written")
                     if (event.dropped.isNotEmpty()) {
                         append(", ${event.dropped.size} dropped: ")
-                        append(event.dropped.joinToString { d ->
-                            "#${d.index} ${d.id ?: "?"}: ${d.reason}"
-                        })
+                        append(event.dropped.joinToString("; ") { it.line })
                     }
                     if (event.setAside != null) {
                         append(", unreadable file kept as ${event.setAside}")

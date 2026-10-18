@@ -27,6 +27,12 @@ android {
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
     }
+
+    // The four fakes (channel, switch, gateway, logger) live in src/testFixtures, shared with
+    // :app's ViewModel test (`testImplementation(testFixtures(project(":platform")))`).
+    testFixtures {
+        enable = true
+    }
 }
 
 dependencies {
@@ -34,6 +40,11 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
+    // The fakes implement :core's and this module's interfaces.
+    testFixturesImplementation(project(":core"))
+
+    // :core's config fixtures (SWAP_SCREENS, ONE_SHORTCUT_TEXT, the in-memory file).
+    testImplementation(testFixtures(project(":core")))
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.4.20")
     // The queued-dispatcher pass over the coordinator (ThorcutsCoordinatorQueuedTest); the
     // same version as kotlinx-coroutines-android above.
