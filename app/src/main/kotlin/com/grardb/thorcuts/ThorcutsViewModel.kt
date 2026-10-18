@@ -140,6 +140,9 @@ class ThorcutsViewModel(app: Application) : AndroidViewModel(app) {
         // on and nothing running (after a force-stop, a crash, an update), this starts the
         // helper. A no-op whenever it already runs.
         coordinator.ensureRunning()
+        // The app list from the start, so the Shortcuts list can name a per-app shortcut's
+        // apps; once, off main; the editor and the picker reuse it.
+        ensureApps()
         // The release ends the recording: the draft takes the combo and the gate reopens.
         viewModelScope.launch {
             coordinator.recording.collect { r ->

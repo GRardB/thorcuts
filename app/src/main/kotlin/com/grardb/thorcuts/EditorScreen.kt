@@ -135,7 +135,9 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             // sight the moment that action is picked.
             SectionLabel("Action")
             for (kind in ActionKind.entries) {
-                ChoiceRow(kind.label, selected = draft.action == kind) { vm.setAction(kind) }
+                ChoiceRow(kind.choiceLabel, selected = draft.action == kind) {
+                    vm.setAction(kind)
+                }
                 if (draft.action == kind && kind.takesScreen) {
                     for (target in ScreenTarget.entries) {
                         ChoiceRow(

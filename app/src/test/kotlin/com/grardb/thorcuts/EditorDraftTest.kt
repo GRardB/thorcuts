@@ -112,6 +112,30 @@ class EditorDraftTest {
     }
 
     @Test
+    fun `the scope line names the apps it knows and keeps the id of one it does not`() {
+        val labels = mapOf("com.b" to "Bitwarden", "com.a" to "Zelda")
+        assertEquals(
+            "Everywhere except: Bitwarden, Zelda",
+            Scope.Global(setOf("com.b", "com.a")).line(labels),
+        )
+        assertEquals(
+            "Applies only in: Bitwarden, com.zzz",
+            Scope.Apps(setOf("com.zzz", "com.b")).line(labels),
+        )
+    }
+
+    @Test
+    fun `an action that aims at a screen trails an ellipsis in the editor, not in the list`() {
+        assertEquals("Close the app on…", ActionKind.CLOSE.choiceLabel)
+        assertEquals("Go home on…", ActionKind.HOME.choiceLabel)
+        assertEquals("Swap the screens", ActionKind.SWAP.choiceLabel)
+        assertEquals(
+            "Close the app on the top screen",
+            Action.CloseScreen(ScreenTarget.TOP).label(),
+        )
+    }
+
+    @Test
     fun `trigger text describes a recorded combo, or says there is none`() {
         assertEquals("AYN + X", base().triggerText)
         assertEquals(

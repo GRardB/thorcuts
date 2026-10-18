@@ -79,6 +79,8 @@ fun ShortcutsScreen(state: UiState, vm: ThorcutsViewModel, listState: LazyListSt
         item {
             ShortcutList(
                 shortcuts = state.shortcuts,
+                // A per-app row names its apps; the ViewModel resolves the list at start.
+                labels = state.apps.associate { it.packageName to it.label },
                 onToggle = { id, on -> vm.setShortcutEnabled(id, on) },
                 onEdit = vm::edit,
             )
@@ -143,6 +145,7 @@ private fun MonitorNotice(onMonitor: () -> Unit) {
 @Composable
 private fun ShortcutList(
     shortcuts: List<Shortcut>,
+    labels: Map<String, String>,
     onToggle: (String, Boolean) -> Unit,
     onEdit: (String) -> Unit,
 ) {
@@ -164,6 +167,7 @@ private fun ShortcutList(
                     if (i > 0) HorizontalDivider()
                     ShortcutRow(
                         shortcut = s,
+                        labels = labels,
                         onToggle = { onToggle(s.id, it) },
                         onEdit = { onEdit(s.id) },
                     )
@@ -173,10 +177,15 @@ private fun ShortcutList(
     }
 }
 
-/** One shortcut: its id, its combo as pieces, its action and scope on one line; the switch
- *  is its enabled flag. The row opens the editor. */
+/** One shortcut: its id, its combo as pieces, its action and scope (the apps by name) on one
+ *  line; the switch is its enabled flag. The row opens the editor. */
 @Composable
-private fun ShortcutRow(shortcut: Shortcut, onToggle: (Boolean) -> Unit, onEdit: () -> Unit) {
+private fun ShortcutRow(
+    shortcut: Shortcut,
+    labels: Map<String, String>,
+    onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -191,7 +200,8 @@ private fun ShortcutRow(shortcut: Shortcut, onToggle: (Boolean) -> Unit, onEdit:
             Text(shortcut.id, style = MaterialTheme.typography.bodyLarge)
             Combo(shortcut.trigger)
             Text(
-                listOfNotNull(shortcut.action.label(), shortcut.scope.line()).joinToString(" · "),
+                listOfNotNull(shortcut.action.label(), shortcut.scope.line(labels))
+                    .joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

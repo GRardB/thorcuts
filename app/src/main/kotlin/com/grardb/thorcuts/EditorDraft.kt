@@ -25,6 +25,10 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
     HOME("Go home on", true),
     OPEN("Open Thorcuts on", true);
 
+    /** The editor's radio: an action that aims at a screen trails an ellipsis, since its
+     *  screen is the nested choice beneath it; the list's [Action.label] completes it. */
+    val choiceLabel: String get() = if (takesScreen) "$label…" else label
+
     fun action(screen: ScreenTarget): Action = when (this) {
         SWAP -> Action.SwapScreens
         MOVE -> Action.MoveFocusedToOtherScreen
@@ -73,13 +77,17 @@ fun Action.label(): String {
     return "${kind.label} ${screen.label()}"
 }
 
-/** One line for a scope that is not a plain Global(), null for one. Shown, never edited
- *  here: M4's app picker is where a scope is set. */
-fun Scope.line(): String? = when (this) {
-    is Scope.Global ->
-        if (excluded.isEmpty()) null
-        else "Everywhere except: ${excluded.sorted().joinToString(", ")}"
-    is Scope.Apps -> "Applies only in: ${included.sorted().joinToString(", ")}"
+/** One line for a scope that is not a plain Global(), null for one: the apps by name
+ *  ([labels]: package → label, the list's), by id when not installed, sorted as shown. Shown,
+ *  never edited here: the app picker is where a scope is set. */
+fun Scope.line(labels: Map<String, String> = emptyMap()): String? {
+    fun names(packages: Set<String>): String =
+        packages.map { labels[it] ?: it }.sortedBy { it.lowercase() }.joinToString(", ")
+    return when (this) {
+        is Scope.Global ->
+            if (excluded.isEmpty()) null else "Everywhere except: ${names(excluded)}"
+        is Scope.Apps -> "Applies only in: ${names(included)}"
+    }
 }
 
 const val FOCUSED_EXPLAINED =
