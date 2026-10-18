@@ -54,3 +54,7 @@ docs/
 # ─── Scratch ────────────────────────────────────────────────────────────────
 scratch/
 tmp/
+
+# brainstorming companion sessions and screenshot-tool output
+.superpowers/
+.playwright-mcp/

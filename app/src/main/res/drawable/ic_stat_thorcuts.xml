@@ -1,12 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The foreground service's status icon: a rounded bar, white (the system tints it). The
-     adaptive launcher icon is not a valid small icon. -->
+<!-- The foreground service's status icon: Lucide's pocket knife as is (ISC; the notice is in
+     THIRD-PARTY.md at the repo root), white because the system keeps only the alpha and tints it.
+     The adaptive launcher icon is not a valid small icon. Source: app/icons/thorcuts-status.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M6,9h12a3,3 0 0 1 0,6H6a3,3 0 0 1 0,-6z" />
+        android:name="handle"
+        android:pathData="M20.83,8.83a4,4 0 0 0 -5.66,-5.66l-12,12a4,4 0 1 0 5.66,5.66Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="blade"
+        android:pathData="M18,11.66V22a4,4 0 0 0 4,-4V6"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="corkscrew"
+        android:pathData="M3,2v1c0,1 2,1 2,2S3,6 3,7s2,1 2,2s-2,1 -2,2s2,1 2,2"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="rivet_pivot"
+        android:pathData="M18,6m-1,0a1,1 0 1 0 2,0a1,1 0 1 0 -2,0"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:name="rivet_butt"
+        android:pathData="M6,18m-1,0a1,1 0 1 0 2,0a1,1 0 1 0 -2,0"
+        android:fillColor="#FFFFFF" />
 </vector>

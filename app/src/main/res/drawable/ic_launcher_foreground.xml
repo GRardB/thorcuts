@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's foreground: a pocket knife with a controller for a handle, on the 108 dp
+     adaptive canvas. The launcher shows the inner 72 dp under its mask; the art fits the 66 dp
+     safe circle. Handle, blade and corkscrew are Lucide's pocket-knife paths (ISC; the notice is
+     in THIRD-PARTY.md at the repo root) on Lucide's 24-unit grid, inside a group that maps the
+     knife's bounding circle onto the safe circle, so strokeWidth 2 is about 4.55 dp. Tools first,
+     handle on top, so their end caps hide under it. Source: app/icons/thorcuts-launcher.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.27586"
+        android:scaleY="2.27586"
+        android:translateX="26.6897"
+        android:translateY="26.6897">
+        <path
+            android:name="corkscrew"
+            android:pathData="M3.17,2.17v1c0,1 2,1 2,2S3.17,6.17 3.17,7.17s2,1 2,2s-2,1 -2,2s2,1 2,2"
+            android:strokeColor="#42A5F5"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:name="blade"
+            android:pathData="M18,11.66V22a4,4 0 0 0 4,-4V6"
+            android:strokeColor="#FFEE58"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:name="handle"
+            android:pathData="M20.83,8.83a4,4 0 0 0 -5.66,-5.66l-12,12a4,4 0 1 0 5.66,5.66Z"
+            android:strokeColor="#BDBDBD"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:name="dpad"
+            android:pathData="M5.5,17h3M7,15.5v3"
+            android:strokeColor="#BDBDBD"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:name="button_green"
+            android:pathData="M15.23,7.35m-1,0a1,1 0 1 0 2,0a1,1 0 1 0 -2,0"
+            android:fillColor="#66BB6A" />
+        <path
+            android:name="button_red"
+            android:pathData="M18.77,6.65m-1,0a1,1 0 1 0 2,0a1,1 0 1 0 -2,0"
+            android:fillColor="#EF5350" />
+    </group>
+</vector>

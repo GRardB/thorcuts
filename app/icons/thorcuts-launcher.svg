@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="108"
+   height="108"
+   viewBox="0 0 108 108"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="thorcuts-launcher-outlined.svg"
+   inkscape:version="1.4 (e7c3feb1, 2024-10-09)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="10.25"
+     inkscape:cx="53.95122"
+     inkscape:cy="54"
+     inkscape:window-width="2560"
+     inkscape:window-height="1330"
+     inkscape:window-x="1680"
+     inkscape:window-y="25"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="background" />
+  <title
+     id="title1">Thorcuts launcher icon, outlined handle</title>
+  <!--
+    Android adaptive icon canvas: 108 x 108 dp, 1 px here = 1 dp. The launcher shows the inner
+    72 x 72 under its mask (circle, squircle, rounded square); keep key art inside the 66 dp safe
+    circle. The Background layer becomes the icon's background layer, the Foreground layer its
+    foreground layer. The Guides layer is hidden and is not part of the icon.
+
+    Handle, blade and corkscrew paths are from Lucide's pocket-knife icon (ISC licence,
+    https://lucide.dev; the full notice is in THIRD-PARTY.md at the repo root). They sit on
+    Lucide's 24-unit grid inside a scaled group, so stroke widths are 2 grid units (about
+    4.55 dp here).
+  -->
+  <g
+     inkscape:groupmode="layer"
+     inkscape:label="Background"
+     id="background">
+    <rect
+       id="ground"
+       width="108"
+       height="108"
+       fill="#2B2930"
+       style="fill:#474451;fill-opacity:1" />
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     inkscape:label="Foreground"
+     id="foreground">
+    <g
+       id="knife"
+       transform="translate(21 21) scale(2.27586) translate(2.5 2.5)"
+       fill="none"
+       stroke-width="2"
+       stroke-linecap="round"
+       stroke-linejoin="round">
+      <!-- Tools first, handle on top: their end caps hide under the handle's stroke. -->
+      <path
+         id="corkscrew"
+         d="M3.17 2.17v1c0 1 2 1 2 2S3.17 6.17 3.17 7.17s2 1 2 2-2 1-2 2 2 1 2 2"
+         stroke="#42A5F5" />
+      <path
+         id="blade"
+         d="M18 11.66V22a4 4 0 0 0 4-4V6"
+         stroke="#FFEE58" />
+      <path
+         id="handle"
+         d="M20.83 8.83a4 4 0 0 0-5.66-5.66l-12 12a4 4 0 1 0 5.66 5.66Z"
+         stroke="#BDBDBD" />
+      <path
+         id="dpad"
+         d="M5.5 17h3M7 15.5v3"
+         stroke="#9E9E9E"
+         style="stroke:#bdbdbd;stroke-opacity:1" />
+      <circle
+         id="button-green"
+         cx="15.23"
+         cy="7.35"
+         r="1"
+         fill="#66BB6A"
+         stroke="none" />
+      <circle
+         id="button-red"
+         cx="18.77"
+         cy="6.65"
+         r="1"
+         fill="#EF5350"
+         stroke="none" />
+    </g>
+  </g>
+  <g
+     inkscape:groupmode="layer"
+     inkscape:label="Guides (hidden)"
+     id="guides"
+     style="display:none">
+    <rect
+       id="visible-area"
+       x="18"
+       y="18"
+       width="72"
+       height="72"
+       fill="none"
+       stroke="#ffffff"
+       stroke-width="0.5"
+       stroke-dasharray="2 2"
+       opacity="0.6" />
+    <circle
+       id="safe-circle"
+       cx="54"
+       cy="54"
+       r="33"
+       fill="none"
+       stroke="#ffffff"
+       stroke-width="0.5"
+       opacity="0.6" />
+  </g>
+</svg>

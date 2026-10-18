@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+     fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <title>Thorcuts status bar icon</title>
+  <!--
+    The foreground service's status bar icon: Lucide's pocket-knife icon as is (ISC licence,
+    https://lucide.dev; the full notice is in THIRD-PARTY.md at the repo root). White on
+    transparent, 24 x 24 dp: Android keeps only the alpha and tints it.
+  -->
+  <path id="handle" d="M20.83 8.83a4 4 0 0 0-5.66-5.66l-12 12a4 4 0 1 0 5.66 5.66Z"/>
+  <path id="blade" d="M18 11.66V22a4 4 0 0 0 4-4V6"/>
+  <path id="corkscrew" d="M3 2v1c0 1 2 1 2 2S3 6 3 7s2 1 2 2-2 1-2 2 2 1 2 2"/>
+  <circle id="rivet-pivot" cx="18" cy="6" r="1" fill="#ffffff" stroke="none"/>
+  <circle id="rivet-butt" cx="6" cy="18" r="1" fill="#ffffff" stroke="none"/>
+</svg>
