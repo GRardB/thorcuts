@@ -4,7 +4,7 @@ Button shortcuts for the AYN Thor. Bind a combo to something only the Thor can d
 screens, move the app in front to the other screen, close the app on a screen, go home on a
 screen, or open an app on a screen.
 
-<!-- Screenshot: assets/shortcuts.png, added on release day. -->
+![The Shortcuts screen: four shortcuts, each a combo and what it does](assets/shortcuts.png)
 
 ## What it needs
 
