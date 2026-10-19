@@ -25,6 +25,7 @@ import com.grardb.thorcuts.platform.helper.HelperChannel
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.log.RecordingLogger
 import com.grardb.thorcuts.platform.privilege.FakeGateway
+import com.grardb.thorcuts.platform.tasks.FakeScreenshots
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -72,6 +73,7 @@ class ThorcutsCoordinatorTest {
         keeper = { held += it },
         homePackages = { emptySet() },
         launchComponent = { null },
+        screenshots = FakeScreenshots(),
         log = log,
         privileged = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         storeDispatcher = Dispatchers.Unconfined,

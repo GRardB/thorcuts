@@ -26,11 +26,16 @@ import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
  * `am`, which can hit a chooser when a package has two launcher activities. What comes
  * back is validated and quoted like any component that reaches a root shell — a value
  * PackageManager computed is not a silent exception to the rule.
+ *
+ * [screenshots] is the bottom screenshot's Android boundary (M7 spec §6): where the root
+ * script leaves the PNG, the save into the gallery, the toast. Asked only on the bottom
+ * path; the top screen's screenshot is Android's own and needs no help from the app.
  */
 class TaskActions(
     private val gateway: PrivilegeGateway,
     private val homePackages: () -> Set<String>,
     private val launchComponent: (String) -> String?,
+    private val screenshots: Screenshots,
 ) {
 
     /** Every task with its display and visibility, plus the focused one, for diagnostics;
@@ -112,16 +117,82 @@ class TaskActions(
         val componentArg = CommandSafety.componentArg(component)
             ?: return "ERR not a component name: '$component'"
         val display = if (screen == ScreenTarget.FOCUSED) {
-            val line = tool("focused")
-            if (!line.startsWith("OK ")) return line
-            FOCUSED_DISPLAY.find(line)?.groupValues?.get(1)
-                ?: return "ERR unexpected focused line: $line"
+            val d = focusedDisplay()
+            if (d.startsWith("ERR ")) return d
+            d
         } else {
             screenArg(screen)
         }
         val out = shell("am start --display $display -n $componentArg") ?: return NO_REPLY
         return if ("Error" in out || "Exception" in out) "ERR am: $out"
         else "OK display $display: $out"
+    }
+
+    /**
+     * Take a screenshot of [screen] (M7 spec §4-6). TOP: the system's own screenshot — the
+     * screenshot key through the root shell, exactly as [goHome] sends Home; the shutter, the
+     * popup and the file are Android's, so no notifier runs. BOTTOM: the system cannot reach
+     * that screen (its screenshot is hard-wired to the default display), so a root `screencap`
+     * on the bottom's physical id writes a PNG into the app's cache, [screenshots] files it
+     * into the gallery, and EVERY outcome of that path — the save's line or any failure before
+     * it — goes to [Screenshots.notify], the toast. FOCUSED asks the tool which display holds
+     * focus, as [openApp] does, and takes that screen's path.
+     */
+    fun takeScreenshot(screen: ScreenTarget): String = when (screen) {
+        ScreenTarget.TOP -> screenshotKey()
+        ScreenTarget.BOTTOM -> bottomScreenshot()
+        ScreenTarget.FOCUSED -> {
+            val d = focusedDisplay()
+            when {
+                d.startsWith("ERR ") -> d
+                d == TOP -> screenshotKey()
+                d == BOTTOM -> bottomScreenshot()
+                else -> "ERR unexpected focused display $d"
+            }
+        }
+    }
+
+    /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
+    private fun screenshotKey(): String {
+        val out = shell("input keyevent KEYCODE_SYSRQ") ?: return NO_REPLY
+        return if (out.isEmpty()) "OK screenshot key sent" else "ERR input: $out"
+    }
+
+    /** The bottom path, with its one rule: whatever it returns, the user is told. */
+    private fun bottomScreenshot(): String = bottomCapture().also(screenshots::notify)
+
+    /**
+     * `screencap -p -d <physical id>` into [Screenshots.frame], readable by the app once it is
+     * 644 (the app owns the directory, so it can delete the file). The script's one line is
+     * `<bytes written> <screencap's output, folded>`: a count above zero means a PNG to file;
+     * zero means screencap refused, and its text (or "wrote nothing") is the reason.
+     */
+    private fun bottomCapture(): String {
+        val frame = screenshots.frame.absolutePath
+        val line = gateway.execScript(
+            listOf(
+                "screencap -p -d ${ThorDisplays.BOTTOM_PHYSICAL_ID} $frame 2>&1 | tr '\\n' ' ' > $frame.err",
+                "chmod 644 $frame",
+                "echo \"\$(wc -c < $frame) \$(cat $frame.err)\"",
+            ),
+        )?.trim() ?: return NO_REPLY
+        val count = line.substringBefore(' ')
+        val text = line.substringAfter(' ', missingDelimiterValue = "").trim()
+        val bytes = count.toLongOrNull() ?: return "ERR unexpected screencap line: $line"
+        if (bytes == 0L) return "ERR screencap: ${text.ifEmpty { "wrote nothing" }}"
+        return screenshots.save()
+    }
+
+    /**
+     * The display that holds input focus, as the tool's `focused` line reports it: its id
+     * (`"0"`, `"4"`), or an `ERR …` line to return as is — the tool's own, or one naming a
+     * `focused` line this cannot read. Shared by [openApp] and [takeScreenshot].
+     */
+    private fun focusedDisplay(): String {
+        val line = tool("focused")
+        if (!line.startsWith("OK ")) return line
+        return FOCUSED_DISPLAY.find(line)?.groupValues?.get(1)
+            ?: "ERR unexpected focused line: $line"
     }
 
     private fun tool(vararg args: String): String {

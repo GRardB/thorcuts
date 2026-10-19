@@ -8,6 +8,7 @@ import com.grardb.thorcuts.platform.coordinator.ThorcutsCoordinator
 import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.log.AndroidLogger
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
+import com.grardb.thorcuts.platform.tasks.GalleryScreenshots
 import com.grardb.thorcuts.platform.tasks.HomePackages
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,9 @@ class ThorcutsApp : Application() {
             launchComponent = { pkg ->
                 packageManager.getLaunchIntentForPackage(pkg)?.component?.flattenToShortString()
             },
+            // The bottom screenshot's gallery, toast and click (M7); the top screen's is
+            // Android's own.
+            screenshots = GalleryScreenshots(this),
             log = AndroidLogger("ThorcutsCoord"),
         )
     }

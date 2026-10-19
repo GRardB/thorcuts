@@ -17,6 +17,7 @@ import com.grardb.thorcuts.platform.helper.HelperSupervisor
 import com.grardb.thorcuts.platform.log.Logger
 import com.grardb.thorcuts.platform.privilege.Privilege
 import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
+import com.grardb.thorcuts.platform.tasks.Screenshots
 import com.grardb.thorcuts.platform.tasks.TaskActions
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -168,6 +169,8 @@ class ThorcutsCoordinator(
     homePackages: () -> Set<String>,
     /** A package's launch activity as `am start -n` takes it, or null; see [TaskActions]. */
     launchComponent: (String) -> String?,
+    /** The bottom screenshot's gallery and toast; see [TaskActions]. */
+    screenshots: Screenshots,
     private val log: Logger,
     /** Where the blocking privileged work and the fires run: Privilege.scope. A test passes
      *  an Unconfined scope so everything runs inline. */
@@ -177,7 +180,7 @@ class ThorcutsCoordinator(
     /** Monotonic milliseconds, for the relaunch chain. A test passes its own. */
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
-    private val tasks: TaskActions = TaskActions(gateway, homePackages, launchComponent)
+    private val tasks: TaskActions = TaskActions(gateway, homePackages, launchComponent, screenshots)
     private val dispatcher = ActionDispatcher(tasks)
     private val helper: HelperChannel = channel(::onHelperMessage)
 

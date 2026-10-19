@@ -26,4 +26,12 @@ object ThorDisplays {
      */
     const val TOP_UNIQUE_ID = "local:4630946441858561667"
     const val BOTTOM_UNIQUE_ID = "local:4630946482288158084"
+
+    /**
+     * The bottom screen as `screencap -d` and `screenrecord --display-id` name it: the
+     * SurfaceFlinger id behind [BOTTOM_UNIQUE_ID]. `-d 0` / `-d 4` give an EMPTY file; this id
+     * gives the bottom screen's content (M7 capture recon, 2026-10-19 — the M1 "black frame"
+     * was a sleeping device; see `findings/2026-10-19-m7-capture-recon.md`).
+     */
+    val BOTTOM_PHYSICAL_ID: String = BOTTOM_UNIQUE_ID.removePrefix("local:")
 }

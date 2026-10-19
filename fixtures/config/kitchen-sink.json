@@ -54,6 +54,15 @@
         "holdMs": 400
       },
       "action": { "kind": "SwapScreens" }
+    },
+    {
+      "action": { "screen": "BOTTOM", "kind": "TakeScreenshot" },
+      "trigger": {
+        "style": "PRESS",
+        "buttons": [ { "value": 1, "code": 308, "type": "KEY", "device": "PAD" } ],
+        "modifiers": ["BACK"]
+      },
+      "id": "shot-bottom"
     }
   ],
   "theme": { "dark": true },

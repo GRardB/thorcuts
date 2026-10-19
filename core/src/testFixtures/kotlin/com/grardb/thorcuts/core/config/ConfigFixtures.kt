@@ -161,6 +161,11 @@ val KITCHEN_SINK = ThorcutsConfig(
             ),
             action = Action.SwapScreens,
         ),
+        Shortcut(
+            id = "shot-bottom",
+            trigger = Trigger(setOf(ModifierKey.BACK), setOf(padKey(308))),
+            action = Action.TakeScreenshot(ScreenTarget.BOTTOM),
+        ),
     ),
     unknown = UnknownFields(
         top = mapOf("theme" to buildJsonObject { put("dark", true) }),

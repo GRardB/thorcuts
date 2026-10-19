@@ -358,6 +358,12 @@ class ConfigCodecTest {
             swap.replace(
                 """"kind":"SwapScreens"""", """"kind":"OpenApp","package":"nope","screen":"TOP"""",
             ) to "The app must be named by its package name (got 'nope')",
+            swap.replace(""""kind":"SwapScreens"""", """"kind":"TakeScreenshot"""")
+                to "TakeScreenshot needs a screen",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"TakeScreenshot","screen":"TOP","package":"a.b"""",
+            ) to "TakeScreenshot takes no package",
         )
     )
 
@@ -374,6 +380,19 @@ class ConfigCodecTest {
         )
         val written = ConfigCodec.encode(c)
         assertTrue("\"package\": \"org.dolphinemu.dolphinemu\"" in written, written)
+        assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+    }
+
+    @Test
+    fun `a TakeScreenshot round-trips with its screen`() {
+        val shot = swap.replace(
+            """"kind":"SwapScreens"""",
+            """"kind":"TakeScreenshot","screen":"BOTTOM"""",
+        )
+        val c = ok(file(shot)).config
+        assertEquals(Action.TakeScreenshot(ScreenTarget.BOTTOM), c.shortcuts.single().action)
+        val written = ConfigCodec.encode(c)
+        assertTrue("\"kind\": \"TakeScreenshot\"" in written, written)
         assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
     }
 

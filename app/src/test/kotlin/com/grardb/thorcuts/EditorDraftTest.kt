@@ -159,6 +159,19 @@ class EditorDraftTest {
     }
 
     @Test
+    fun `a screenshot action round-trips with its screen, names no app, and reads in both places`() {
+        val s = base().copy(action = ActionKind.SHOT, screen = ScreenTarget.BOTTOM).toShortcut()
+        assertEquals(Action.TakeScreenshot(ScreenTarget.BOTTOM), s.action)
+        val back = EditorDraft.of(s)
+        assertEquals(ActionKind.SHOT, back.action)
+        assertEquals(ScreenTarget.BOTTOM, back.screen)
+        assertNull(back.openApp)
+        assertEquals("Take a screenshot of…", ActionKind.SHOT.choiceLabel)
+        assertEquals("Take a screenshot of the bottom screen", s.action.label())
+        assertEquals(ActionKind.SHOT, ActionKind.entries.last())   // last in the editor
+    }
+
+    @Test
     fun `the list names the app an action opens, by label when it knows one`() {
         val open = Action.OpenApp("com.a", ScreenTarget.TOP)
         assertEquals("Open Zelda on the top screen", open.label(mapOf("com.a" to "Zelda")))

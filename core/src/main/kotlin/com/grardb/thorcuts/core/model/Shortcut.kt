@@ -50,9 +50,9 @@ data class Trigger(
 enum class ScreenTarget { TOP, BOTTOM, FOCUSED }
 
 /**
- * Parent spec §9's actions, as data only. Nothing in :core dispatches them; the app
- * resolves a fired rule back to its Shortcut and acts from there. [OpenApp] generalises
- * what was `OpenThorcuts(screen)` (the follow-ups spec, 2026-10-18): any installed app,
+ * Parent spec §9's actions, plus M7's screenshot, as data only. Nothing in :core dispatches
+ * them; the app resolves a fired rule back to its Shortcut and acts from there. [OpenApp]
+ * generalises what was `OpenThorcuts(screen)` (the follow-ups spec, 2026-10-18): any installed app,
  * by package, on a screen.
  */
 sealed interface Action {
@@ -60,6 +60,11 @@ sealed interface Action {
     data object MoveFocusedToOtherScreen : Action
     data class CloseScreen(val screen: ScreenTarget) : Action
     data class GoHome(val screen: ScreenTarget) : Action
+
+    /** Take a screenshot of [screen]: Android's own for the top screen, a root capture filed
+     *  into the gallery for the bottom (M7, 2026-10-19). Nothing to validate: no value of
+     *  this reaches a shell. */
+    data class TakeScreenshot(val screen: ScreenTarget) : Action
 
     /** Open [packageName]'s launch activity on [screen]. The name is validated here because
      *  it reaches a root shell (`am start`); the codec's drop reason is this message. */

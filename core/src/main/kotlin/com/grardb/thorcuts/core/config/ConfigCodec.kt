@@ -209,6 +209,7 @@ object ConfigCodec {
             }
             "CloseScreen" -> { noPackage(); Action.CloseScreen(needsScreen()) }
             "GoHome" -> { noPackage(); Action.GoHome(needsScreen()) }
+            "TakeScreenshot" -> { noPackage(); Action.TakeScreenshot(needsScreen()) }
             "OpenApp" -> Action.OpenApp(pkg ?: fail("$kind needs a package"), needsScreen())
             else -> fail("unknown action kind '$kind'")
         }
@@ -269,6 +270,7 @@ object ConfigCodec {
                     Action.MoveFocusedToOtherScreen -> put("kind", "MoveFocusedToOtherScreen")
                     is Action.CloseScreen -> screenAction("CloseScreen", a.screen)
                     is Action.GoHome -> screenAction("GoHome", a.screen)
+                    is Action.TakeScreenshot -> screenAction("TakeScreenshot", a.screen)
                     is Action.OpenApp -> {
                         put("kind", "OpenApp")
                         put("package", a.packageName)

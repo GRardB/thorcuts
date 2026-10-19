@@ -4,9 +4,11 @@ import com.grardb.thorcuts.core.model.Action
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.platform.privilege.FakeGateway
 import com.grardb.thorcuts.platform.privilege.FakeGateway.Call
+import com.grardb.thorcuts.platform.tasks.FakeScreenshots
 import com.grardb.thorcuts.platform.tasks.TaskActions
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Each Action variant reaches exactly one TaskActions call with the right screen, and
@@ -17,8 +19,10 @@ class ActionDispatcherTest {
 
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
 
-    private fun dispatcher(g: FakeGateway) =
-        ActionDispatcher(TaskActions(g, { setOf("c.home") }, { pkg -> "$pkg/.MainActivity" }))
+    private fun dispatcher(g: FakeGateway, shots: FakeScreenshots = FakeScreenshots()) =
+        ActionDispatcher(
+            TaskActions(g, { setOf("c.home") }, { pkg -> "$pkg/.MainActivity" }, shots),
+        )
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 
@@ -73,5 +77,28 @@ class ActionDispatcherTest {
             listOf(script("am start --display 0 -n 'org.dolphinemu.dolphinemu/.MainActivity'")),
             g.calls,
         )
+    }
+
+    @Test
+    fun `TakeScreenshot TOP sends the screenshot key`() {
+        val g = FakeGateway("")
+        assertEquals(
+            "OK screenshot key sent",
+            dispatcher(g).dispatch(Action.TakeScreenshot(ScreenTarget.TOP)),
+        )
+        assertEquals(listOf(script("input keyevent KEYCODE_SYSRQ")), g.calls)
+    }
+
+    @Test
+    fun `TakeScreenshot BOTTOM captures through the script path and files the frame`() {
+        val g = FakeGateway("1236356 ")
+        val shots = FakeScreenshots()
+        assertEquals(
+            "OK saved Pictures/Screenshots/Screenshot_20261019-182426_bottom.png",
+            dispatcher(g, shots).dispatch(Action.TakeScreenshot(ScreenTarget.BOTTOM)),
+        )
+        assertEquals(1, g.calls.size)
+        assertTrue((g.calls.single() as Call.Script).lines.first().startsWith("screencap -p -d 4630946482288158084 "))
+        assertEquals(1, shots.saves)
     }
 }

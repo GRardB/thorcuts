@@ -30,7 +30,8 @@ class TaskActionsTest {
         g: FakeGateway,
         launchers: Set<String> = setOf("c.launcher"),
         resolve: (String) -> String? = mainOf,
-    ) = TaskActions(g, { launchers }, resolve)
+        shots: FakeScreenshots = FakeScreenshots(),
+    ) = TaskActions(g, { launchers }, resolve, shots)
 
     // ── the tool's subcommands ────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ class TaskActionsTest {
     fun `closeScreen asks for the launchers on every call`() {
         var asked = 0
         val g = FakeGateway("OK closed 1@0 a.b", "OK closed 2@0 a.b")
-        val a = TaskActions(g, { asked++; setOf("c.launcher") }, mainOf)
+        val a = TaskActions(g, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots())
         a.closeScreen(ScreenTarget.TOP)
         a.closeScreen(ScreenTarget.TOP)
         assertEquals(2, asked)
@@ -91,7 +92,9 @@ class TaskActionsTest {
     @Test
     fun `closeScreen passes only names that are packages`() {
         val g = FakeGateway("OK closed 1@4 a.b")
-        val a = TaskActions(g, { setOf("rip.moth.cocoonshell", "not a package; rm x") }, mainOf)
+        val a = TaskActions(
+            g, { setOf("rip.moth.cocoonshell", "not a package; rm x") }, mainOf, FakeScreenshots(),
+        )
         a.closeScreen(ScreenTarget.BOTTOM)
         assertEquals(listOf(entryPoint("close", "4", "rip.moth.cocoonshell")), g.calls)
     }
@@ -99,7 +102,7 @@ class TaskActionsTest {
     @Test
     fun `closeScreen answers an ERR line when the launchers cannot be resolved`() {
         val g = FakeGateway()
-        val a = TaskActions(g, { throw IllegalStateException("pm dead") }, mainOf)
+        val a = TaskActions(g, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots())
         val line = a.closeScreen(ScreenTarget.BOTTOM)
         assertTrue(line.startsWith("ERR launchers: "), line)
         assertTrue(g.calls.isEmpty())                  // nothing reached the tool
@@ -110,7 +113,7 @@ class TaskActionsTest {
         // Every device has a HOME handler, so an empty resolution means the query failed —
         // and a close with no names would remove a launcher that happened to be the app.
         val g = FakeGateway()
-        val a = TaskActions(g, { emptySet() }, mainOf)
+        val a = TaskActions(g, { emptySet() }, mainOf, FakeScreenshots())
         assertEquals("ERR launchers: none resolved; not closing", a.closeScreen(ScreenTarget.TOP))
         assertTrue(g.calls.isEmpty())
     }
@@ -199,6 +202,123 @@ class TaskActionsTest {
         )
     }
 
+    // ── take a screenshot: the system key for the top, a root screencap for the bottom ──
+
+    private val frame = "/data/user/0/com.grardb.thorcuts/cache/screenshot.png"
+
+    /** The bottom's script, as TaskActions builds it (M7 spec §5). */
+    private fun bottomScript(): Call = Call.Script(
+        listOf(
+            "screencap -p -d 4630946482288158084 $frame 2>&1 | tr '\\n' ' ' > $frame.err",
+            "chmod 644 $frame",
+            "echo \"\$(wc -c < $frame) \$(cat $frame.err)\"",
+        ),
+    )
+
+    @Test
+    fun `takeScreenshot TOP sends the screenshot key and reads silence as success`() {
+        val g = FakeGateway("")
+        val shots = FakeScreenshots()
+        assertEquals("OK screenshot key sent", actions(g, shots = shots).takeScreenshot(ScreenTarget.TOP))
+        assertEquals(listOf(script("input keyevent KEYCODE_SYSRQ")), g.calls)
+        assertEquals(0, shots.saves)
+        assertTrue(shots.notified.isEmpty())   // the popup is the feedback
+    }
+
+    @Test
+    fun `takeScreenshot TOP reports whatever input printed as an ERR`() {
+        val usage = "Error: Unknown command: keyevnt Usage: input [<source>] ..."
+        val g = FakeGateway("$usage ")
+        assertEquals("ERR input: $usage", actions(g).takeScreenshot(ScreenTarget.TOP))
+    }
+
+    @Test
+    fun `takeScreenshot BOTTOM runs the screencap script, saves, notifies and returns the save's line`() {
+        val g = FakeGateway("1236356 ")
+        val shots = FakeScreenshots()
+        val line = actions(g, shots = shots).takeScreenshot(ScreenTarget.BOTTOM)
+        assertEquals("OK saved Pictures/Screenshots/Screenshot_20261019-182426_bottom.png", line)
+        assertEquals(listOf(bottomScript()), g.calls)
+        assertEquals(1, shots.saves)
+        assertEquals(listOf(line), shots.notified)
+    }
+
+    @Test
+    fun `takeScreenshot BOTTOM with a save that fails notifies and returns that line`() {
+        val g = FakeGateway("1236356 ")
+        val shots = FakeScreenshots("ERR gallery: java.io.IOException: no output stream")
+        val line = actions(g, shots = shots).takeScreenshot(ScreenTarget.BOTTOM)
+        assertEquals("ERR gallery: java.io.IOException: no output stream", line)
+        assertEquals(listOf(line), shots.notified)
+    }
+
+    @Test
+    fun `takeScreenshot BOTTOM with nothing written saves nothing and reports screencap's text`() {
+        val g = FakeGateway("0 Error opening display 4630946482288158084 ")
+        val shots = FakeScreenshots()
+        assertEquals(
+            "ERR screencap: Error opening display 4630946482288158084",
+            actions(g, shots = shots).takeScreenshot(ScreenTarget.BOTTOM),
+        )
+        assertEquals(0, shots.saves)
+        assertEquals(listOf("ERR screencap: Error opening display 4630946482288158084"), shots.notified)
+
+        val silent = FakeGateway("0 ")
+        val shots2 = FakeScreenshots()
+        assertEquals("ERR screencap: wrote nothing", actions(silent, shots = shots2).takeScreenshot(ScreenTarget.BOTTOM))
+        assertEquals(0, shots2.saves)
+    }
+
+    @Test
+    fun `takeScreenshot BOTTOM with an unparseable line or no reply is an ERR, notified`() {
+        val odd = FakeGateway("sh: wc: not found")
+        val shots = FakeScreenshots()
+        assertEquals(
+            "ERR unexpected screencap line: sh: wc: not found",
+            actions(odd, shots = shots).takeScreenshot(ScreenTarget.BOTTOM),
+        )
+        assertEquals(0, shots.saves)
+        assertEquals(1, shots.notified.size)
+
+        val none = FakeGateway(null)
+        val shots2 = FakeScreenshots()
+        assertEquals("ERR no reply from pservice", actions(none, shots = shots2).takeScreenshot(ScreenTarget.BOTTOM))
+        assertEquals(listOf("ERR no reply from pservice"), shots2.notified)
+    }
+
+    @Test
+    fun `takeScreenshot FOCUSED asks the tool, then takes the top path on display 0`() {
+        val g = FakeGateway("OK focused display=0 task=12 pkg=org.x", "")
+        val shots = FakeScreenshots()
+        assertEquals("OK screenshot key sent", actions(g, shots = shots).takeScreenshot(ScreenTarget.FOCUSED))
+        assertEquals(listOf(entryPoint("focused"), script("input keyevent KEYCODE_SYSRQ")), g.calls)
+        assertTrue(shots.notified.isEmpty())
+    }
+
+    @Test
+    fun `takeScreenshot FOCUSED takes the bottom path on display 4`() {
+        val g = FakeGateway("OK focused display=4 task=7 pkg=org.x", "1236356 ")
+        val shots = FakeScreenshots()
+        val line = actions(g, shots = shots).takeScreenshot(ScreenTarget.FOCUSED)
+        assertEquals("OK saved Pictures/Screenshots/Screenshot_20261019-182426_bottom.png", line)
+        assertEquals(listOf(entryPoint("focused"), bottomScript()), g.calls)
+        assertEquals(listOf(line), shots.notified)
+    }
+
+    @Test
+    fun `takeScreenshot FOCUSED returns the tool's ERR verbatim, and refuses another display`() {
+        val err = FakeGateway("ERR no focused task")
+        assertEquals("ERR no focused task", actions(err).takeScreenshot(ScreenTarget.FOCUSED))
+        assertEquals(listOf(entryPoint("focused")), err.calls)
+
+        val elsewhere = FakeGateway("OK focused display=2 task=7 pkg=org.x")
+        assertEquals(
+            "ERR unexpected focused display 2",
+            actions(elsewhere).takeScreenshot(ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(entryPoint("focused")), elsewhere.calls)
+    }
+
     @Test
     fun `openApp FOCUSED returns the tool's ERR line and starts nothing`() {
         val g = FakeGateway("ERR no focused root task")
@@ -219,7 +339,7 @@ class TaskActionsTest {
     @Test
     fun `openApp starts whatever component the resolver names for the package, quoted`() {
         val g = FakeGateway("Starting: Intent { } ")
-        val a = actions(g) { pkg -> "$pkg/org.dolphinemu.dolphinemu.ui.MainActivity" }
+        val a = actions(g, resolve = { pkg -> "$pkg/org.dolphinemu.dolphinemu.ui.MainActivity" })
         assertEquals(
             "OK display 0: Starting: Intent { }",
             a.openApp("org.dolphinemu.dolphinemu", ScreenTarget.TOP),
@@ -238,7 +358,7 @@ class TaskActionsTest {
     @Test
     fun `openApp answers a line and runs nothing when the package has no launch activity`() {
         val g = FakeGateway()
-        val a = actions(g) { null }
+        val a = actions(g, resolve = { null })
         assertEquals(
             "ERR no launch activity for org.gone.app",
             a.openApp("org.gone.app", ScreenTarget.BOTTOM),
@@ -254,12 +374,12 @@ class TaskActionsTest {
     @Test
     fun `openApp answers a line when the resolver throws, or names a non-component`() {
         val g = FakeGateway()
-        val dead = actions(g) { throw IllegalStateException("pm dead") }
+        val dead = actions(g, resolve = { throw IllegalStateException("pm dead") })
         assertEquals(
             "ERR launch activity: java.lang.IllegalStateException: pm dead",
             dead.openApp(thorcuts, ScreenTarget.TOP),
         )
-        val odd = actions(g) { "not a component; rm -rf /" }
+        val odd = actions(g, resolve = { "not a component; rm -rf /" })
         assertEquals(
             "ERR not a component name: 'not a component; rm -rf /'",
             odd.openApp(thorcuts, ScreenTarget.TOP),
@@ -271,7 +391,7 @@ class TaskActionsTest {
     fun `openApp asks the resolver on every call`() {
         val asked = mutableListOf<String>()
         val g = FakeGateway("", "")
-        val a = actions(g) { pkg -> asked += pkg; "$pkg/.Main" }
+        val a = actions(g, resolve = { pkg -> asked += pkg; "$pkg/.Main" })
         a.openApp("a.b", ScreenTarget.TOP)
         a.openApp("c.d", ScreenTarget.BOTTOM)
         assertEquals(listOf("a.b", "c.d"), asked)

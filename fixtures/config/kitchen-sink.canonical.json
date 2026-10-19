@@ -148,6 +148,32 @@
         "kind": "Global",
         "excluded": []
       }
+    },
+    {
+      "id": "shot-bottom",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "BACK"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 308,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "TakeScreenshot",
+        "screen": "BOTTOM"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
     }
   ],
   "theme": {

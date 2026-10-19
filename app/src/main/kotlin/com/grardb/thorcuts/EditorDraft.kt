@@ -17,21 +17,22 @@ enum class ScopeKind(val label: String) {
     ONLY("Only in…");
 }
 
-/** The five kinds of action the editor offers; three of them aim at a screen, and one of
+/** The six kinds of action the editor offers; four of them aim at a screen, and one of
  *  those opens an app chosen in the picker. */
 enum class ActionKind(val label: String, val takesScreen: Boolean) {
     SWAP("Swap the screens", false),
     MOVE("Move the focused app to the other screen", false),
     CLOSE("Close the app on", true),
     HOME("Go home on", true),
-    OPEN("Open an app", true);
+    OPEN("Open an app", true),
+    SHOT("Take a screenshot of", true);
 
     /** The editor's radio: an action that aims at a screen trails an ellipsis, since its
      *  screen (and its app) is the nested choice beneath it; the list's [Action.label]
      *  completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
 
-    /** The action, from the nested choices: [screen] for the three that aim at one, [app]
+    /** The action, from the nested choices: [screen] for the four that aim at one, [app]
      *  (a package) for [OPEN] — refused with `Choose an app` when there is none. */
     fun action(screen: ScreenTarget, app: String?): Action = when (this) {
         SWAP -> Action.SwapScreens
@@ -39,6 +40,7 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
         CLOSE -> Action.CloseScreen(screen)
         HOME -> Action.GoHome(screen)
         OPEN -> Action.OpenApp(app ?: throw IllegalArgumentException(Copy.CHOOSE_APP), screen)
+        SHOT -> Action.TakeScreenshot(screen)
     }
 
     companion object {
@@ -48,12 +50,14 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
             is Action.CloseScreen -> CLOSE
             is Action.GoHome -> HOME
             is Action.OpenApp -> OPEN
+            is Action.TakeScreenshot -> SHOT
         }
 
         fun screenOf(action: Action): ScreenTarget? = when (action) {
             is Action.CloseScreen -> action.screen
             is Action.GoHome -> action.screen
             is Action.OpenApp -> action.screen
+            is Action.TakeScreenshot -> action.screen
             else -> null
         }
 
