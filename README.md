@@ -1,8 +1,13 @@
 # Thorcuts
 
-Button shortcuts for the AYN Thor. Bind a combo to something only the Thor can do: swap the two
-screens, move the app in front to the other screen, close the app on a screen, go home on a
-screen, or open an app on a screen.
+Button shortcuts for the AYN Thor. Bind a combo to:
+
+1. Swap the two screens
+1. Move the app in front to the other screen
+1. Close the app on a screen
+1. Go home on a screen
+1. Open an app on a screen
+1. Take a screenshot of a screen.
 
 ![The Shortcuts screen: four shortcuts, each a combo and what it does](assets/shortcuts.png)
 
@@ -90,7 +95,8 @@ Thorcuts stops working.
 
 The helper takes exclusive control of the controller and re-emits a virtual one, named and
 numbered like the real one, so games keep working and a bound combo never leaks into them.
-Screen actions use the same privileged route; there is no other.
+Screen actions use the same privileged route; there is no other. A screenshot of the bottom
+screen is the same frame grab Android's own tools use, run the same way.
 
 Thorcuts declares four Android permissions and nothing else: running a foreground service, its
 special-use type, starting at boot, and posting the notification above. The accessibility
@@ -107,6 +113,8 @@ storage, and nothing leaves the device unless you export it.
 - A force-stop leaves shortcuts off until the next time you open Thorcuts.
 - A notification you turned back on reappears only after the switch goes off and on again, or
   after a reboot.
+- A screenshot of the bottom screen goes straight to the gallery, with a toast on the top
+  screen. Only the top screen gets Android's own screenshot popup.
 - "Swap the screens" is a one-way move when one screen shows only the launcher: the app crosses
   over, and the launcher fills the screen it left. Closing an app shows the launcher; a screen
   is never left blank.
