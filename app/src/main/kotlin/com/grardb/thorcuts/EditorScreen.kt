@@ -20,6 +20,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +36,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,7 +53,7 @@ private val NESTED = 32.dp
 
 /**
  * One shortcut being added or edited: its name (editable on an existing one too: a rename),
- * the recorder, Tap or Timer, the action and — nested under it — the app it opens and its
+ * the recorder, Tap or Timer, the action (a select) and, under it, the app it opens and its
  * screen, where it applies and — nested — the chosen apps, Save / Cancel / Delete (which asks
  * first). Nothing here is privileged. A recording ends with the
  * combo's release (the ViewModel), on Cancel and Save, on the timeout, and when this screen
@@ -133,43 +139,32 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             }
             state.warning?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
-            // The screen choice sits under the action it belongs to, indented, so it is in
-            // sight the moment that action is picked; "Open an app" puts the app first,
-            // the way the list reads it ("Open Dolphin on the bottom screen").
+            // The action is a select: six choices are too many for radios. What it needs sits
+            // flush beneath it — the app an "Open an app" opens, then the screen the four
+            // screen actions aim at — in sight the moment the action is picked, and in the
+            // order the list reads it ("Open Dolphin on the bottom screen"). No indent: a
+            // full-width field gives one nothing to hang from.
             val installed = state.apps.associateBy { it.packageName }
             SectionLabel("Action")
-            ChoiceGroup {
-                for (kind in ActionKind.entries) {
-                    ChoiceRow(kind.choiceLabel, selected = draft.action == kind) {
-                        vm.setAction(kind)
-                    }
-                    if (draft.action == kind && kind == ActionKind.OPEN) {
-                        Column(
-                            modifier = Modifier.padding(start = NESTED),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            val pkg = draft.openApp
-                            if (pkg == null) {
-                                Text(Copy.NO_APP, style = MaterialTheme.typography.bodySmall)
-                            } else {
-                                ChosenApp(installed[pkg], pkg)
-                            }
-                            FilledTonalButton(
-                                onClick = vm::openAppPicker,
-                                shape = MaterialTheme.shapes.small,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Choose app…") }
-                        }
-                    }
-                    if (draft.action == kind && kind.takesScreen) {
-                        ChoiceGroup {
-                            for (target in ScreenTarget.entries) {
-                                ChoiceRow(
-                                    target.choiceLabel(),
-                                    selected = draft.screen == target,
-                                    nested = true,
-                                ) { vm.setScreen(target) }
-                            }
+            ActionSelect(selected = draft.action, onSelect = vm::setAction)
+            if (draft.action == ActionKind.OPEN) {
+                val pkg = draft.openApp
+                if (pkg == null) {
+                    Text(Copy.NO_APP, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    ChosenApp(installed[pkg], pkg)
+                }
+                FilledTonalButton(
+                    onClick = vm::openAppPicker,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Choose app…") }
+            }
+            if (draft.action.takesScreen) {
+                ChoiceGroup {
+                    for (target in ScreenTarget.entries) {
+                        ChoiceRow(target.choiceLabel(), selected = draft.screen == target) {
+                            vm.setScreen(target)
                         }
                     }
                 }
@@ -282,21 +277,12 @@ private fun ChoiceGroup(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /** One choice of a few: a radio and its label, the whole row ONE tap target with the radio's
- *  role (the radio itself has no click, so a screen reader announces the row once); [nested]
- *  indents it under the choice above. */
+ *  role (the radio itself has no click, so a screen reader announces the row once). */
 @Composable
-private fun ChoiceRow(
-    label: String,
-    selected: Boolean,
-    nested: Boolean = false,
-    onSelect: () -> Unit,
-) {
+private fun ChoiceRow(label: String, selected: Boolean, onSelect: () -> Unit) {
     Row(
-        // The indent comes BEFORE the selectable, so a nested row's tap target and ripple
-        // start at the indent too (the editor polish's final review).
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = if (nested) NESTED else 0.dp)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -309,6 +295,42 @@ private fun ChoiceRow(
             modifier = Modifier.minimumInteractiveComponentSize(),
         )
         Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** The action, as a select: the field reads the chosen one as the menu words it (an ellipsis
+ *  on the four that aim at a screen, since that choice follows beneath), and the menu, as wide
+ *  as the field, lists the six in the editor's order. The box gives the field the dropdown
+ *  role; `PrimaryNotEditable` makes the whole field the tap target and keeps the keyboard
+ *  away. Open or shut is a plain `remember`: a menu is transient. The exposed dropdown is
+ *  still experimental in material3 1.4; the opt-in is confined to this one composable. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActionSelect(selected: ActionKind, onSelect: (ActionKind) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected.choiceLabel,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (kind in ActionKind.entries) {
+                DropdownMenuItem(
+                    text = { Text(kind.choiceLabel) },
+                    onClick = {
+                        onSelect(kind)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
     }
 }
 

@@ -27,8 +27,8 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
     OPEN("Open an app", true),
     SHOT("Take a screenshot of", true);
 
-    /** The editor's radio: an action that aims at a screen trails an ellipsis, since its
-     *  screen (and its app) is the nested choice beneath it; the list's [Action.label]
+    /** The editor's select: an action that aims at a screen trails an ellipsis, since its
+     *  screen (and its app) is the choice beneath it; the list's [Action.label]
      *  completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
 
