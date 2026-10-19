@@ -185,10 +185,20 @@ static void test_ayn_tap_synthesizes_the_press(void) {
     m1(&s);
     tc_step(&s, AYN_DOWN, 1000);
     tc_out o = tc_step(&s, AYN_UP, 1120);
-    /* Nothing fired, so the app must still get its AYN press. */
-    CHECK(o.n == 2);
+    /* Nothing fired, so the app must still get its AYN press: the down now, the up
+       TC_TAP_MS later. A down and an up in one report is a press of no width, and a game
+       that samples the pad once a frame never sees one. */
+    CHECK(o.n == 1);
     CHECK(is(o.items[0], TC_SYNTH, TC_CODE_AYN, 1));
-    CHECK(is(o.items[1], TC_SYNTH, TC_CODE_AYN, 0));
+    CHECK(o.deadline_ms == 1120 + TC_TAP_MS);
+    CHECK(!s.session);
+    tc_out early = tc_step(&s, tick_event(), 1120 + TC_TAP_MS - 1);
+    CHECK(early.n == 0);
+    CHECK(early.deadline_ms == 1120 + TC_TAP_MS);
+    tc_out up = tc_step(&s, tick_event(), 1120 + TC_TAP_MS);
+    CHECK(up.n == 1);
+    CHECK(is(up.items[0], TC_SYNTH, TC_CODE_AYN, 0));
+    CHECK(up.deadline_ms == -1);
 }
 
 static void test_ayn_plus_x_held_fires_the_rule(void) {
@@ -406,7 +416,8 @@ static void test_unbound_axis_is_forwarded(void) {
     tc_out o = tc_step(&s, axis(16, 1), 2050);
     CHECK(o.n == 1);
     CHECK(is(o.items[0], TC_FORWARD, 16, 1));
-    CHECK(count_of(tc_step(&s, AYN_UP, 2100), TC_SYNTH) == 2);   /* the chord was intact */
+    tc_out u = tc_step(&s, AYN_UP, 2100);
+    CHECK(count_of(u, TC_SYNTH) == 1 && u.deadline_ms == 2100 + TC_TAP_MS);   /* intact: a tap */
 }
 
 static void test_panic_keys_still_reach_the_app(void) {
@@ -584,10 +595,10 @@ static void test_bare_hold_arms_on_down_and_a_tap_synthesises(void) {
     fresh(&s2);
     tc_step(&s2, HOME_DOWN, 1000);
     tc_out tap = tc_step(&s2, HOME_UP, 1200);
-    CHECK(tap.n == 2);
+    CHECK(tap.n == 1);
     CHECK(is(tap.items[0], TC_SYNTH, TC_CODE_HOME, 1));
-    CHECK(is(tap.items[1], TC_SYNTH, TC_CODE_HOME, 0));
-    CHECK(tap.deadline_ms == -1);
+    CHECK(tap.deadline_ms == 1200 + TC_TAP_MS);   /* the hold is gone; the tap's up is due */
+    CHECK(is(tc_step(&s2, tick_event(), 1200 + TC_TAP_MS).items[0], TC_SYNTH, TC_CODE_HOME, 0));
 }
 
 static void test_bare_press_and_bare_hold_coexist(void) {
@@ -923,6 +934,70 @@ static void test_modifiers_no_set_wants_are_handed_through_at_the_window(void) {
     CHECK(is(o.items[1], TC_SYNTH, TC_CODE_HOME, 1));
 }
 
+/* ---- a synthesised tap has a width ---- */
+
+static void test_a_re_press_inside_the_tap_flushes_its_up_first(void) {
+    tc_state s;
+    m1(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    tc_step(&s, AYN_UP, 1100);   /* the tap's down is out; its up is due at 1100 + TC_TAP_MS */
+    /* Pressed again before the up went out: the twin gets the up, then the new session
+       opens on a swallowed down, in that order. Never a second down on a key the twin has
+       down, and never a stray up landing after a session the new press might fire. */
+    tc_out again = tc_step(&s, AYN_DOWN, 1120);
+    CHECK(again.n == 2);
+    CHECK(is(again.items[0], TC_SYNTH, TC_CODE_AYN, 0));
+    CHECK(again.items[1].kind == TC_SWALLOW);
+    CHECK(again.deadline_ms == 1120 + TC_LONE_MS);   /* the new window; no tap-up left */
+    CHECK(tc_step(&s, tick_event(), 1100 + TC_TAP_MS).n == 0);
+    CHECK(s.session);
+}
+
+static void test_a_tap_up_is_owed_even_after_the_table_changes(void) {
+    /* Start is a modifier here. The tap's session closes on the release, which installs
+       the deferred table, one with no Start rule: Start is an ordinary button from then
+       on, but the twin still has it down from the tap. A real down flushes that up first. */
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    rule(M_START, PRESS, 0, b, 1);
+    tc_state s;
+    fresh(&s);
+    tc_step(&s, START_DOWN, 1000);
+    table_begin(2);
+    rule(M_AYN, PRESS, 0, b, 1);
+    CHECK(tc_matcher_set_table(&s, &T) == TC_SET_DEFERRED);
+    tc_out o = tc_step(&s, START_UP, 1100);
+    CHECK(o.n == 1 && is(o.items[0], TC_SYNTH, 315, 1));
+    CHECK(!s.session);   /* closed: generation 2 is installed */
+    tc_out again = tc_step(&s, START_DOWN, 1120);
+    CHECK(again.n == 2);
+    CHECK(is(again.items[0], TC_SYNTH, 315, 0));
+    CHECK(is(again.items[1], TC_FORWARD, 315, 1));
+    CHECK(again.deadline_ms == -1);
+    CHECK(tc_step(&s, tick_event(), 1100 + TC_TAP_MS).n == 0);
+    CHECK(is(tc_step(&s, START_UP, 1300).items[0], TC_FORWARD, 315, 0));
+}
+
+static void test_a_pending_tap_up_shares_the_clock_with_a_hold(void) {
+    table_begin(1);
+    tc_control b[] = { K(X_CODE) };
+    rule(M_AYN, PRESS, 0, b, 1);
+    int hold = rule(M_HOME, HOLD, 400, NULL, 0);
+    tc_state s;
+    fresh(&s);
+    tc_step(&s, AYN_DOWN, 1000);
+    CHECK(tc_step(&s, AYN_UP, 1100).deadline_ms == 1100 + TC_TAP_MS);
+    /* Home arms its hold while AYN's up is still owed: the sooner deadline is the tap's,
+       and the tick that pays it leaves the hold armed */
+    tc_out h = tc_step(&s, HOME_DOWN, 1110);
+    CHECK(h.n == 1 && h.items[0].kind == TC_SWALLOW);
+    CHECK(h.deadline_ms == 1100 + TC_TAP_MS);
+    tc_out up = tc_step(&s, tick_event(), 1100 + TC_TAP_MS);
+    CHECK(up.n == 1 && is(up.items[0], TC_SYNTH, TC_CODE_AYN, 0));
+    CHECK(up.deadline_ms == 1110 + 400);
+    CHECK(fires(tc_step(&s, tick_event(), 1110 + 400), 1, (uint16_t)hold));
+}
+
 static void test_releasing_the_modifier_with_a_button_swallowed_passes_through(void) {
     table_begin(1);
     tc_control b[] = { K(X_CODE) };
@@ -982,7 +1057,8 @@ static void test_kitchen_sink_fixture_semantics(void) {
     CHECK(fires(tc_step(&s, tick_event(), 1500), 2147483647u, 1));
     tc_step(&s, HOME_UP, 1600);
     tc_step(&s, HOME_DOWN, 2000);
-    CHECK(count_of(tc_step(&s, HOME_UP, 2100), TC_SYNTH) == 2);
+    CHECK(count_of(tc_step(&s, HOME_UP, 2100), TC_SYNTH) == 1);
+    CHECK(count_of(tc_step(&s, tick_event(), 2100 + TC_TAP_MS), TC_SYNTH) == 1);
     /* rule 2: AYN + all four, fires only on the fourth */
     tc_step(&s, AYN_DOWN, 3000);
     CHECK(count_of(tc_step(&s, A_DOWN, 3010), TC_FIRE) == 0);
@@ -1086,6 +1162,9 @@ int main(void) {
     RUN(test_a_second_modifier_restarts_the_window);
     RUN(test_a_modifier_held_after_a_fire_is_not_handed_through);
     RUN(test_modifiers_no_set_wants_are_handed_through_at_the_window);
+    RUN(test_a_re_press_inside_the_tap_flushes_its_up_first);
+    RUN(test_a_tap_up_is_owed_even_after_the_table_changes);
+    RUN(test_a_pending_tap_up_shares_the_clock_with_a_hold);
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

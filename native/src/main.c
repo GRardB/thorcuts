@@ -215,13 +215,17 @@ static void note_emitted(tc_event ev) {
    as a down (the twin's state says so), and dropping its up would leave it held in the game
    until pressed again — a stuck button, the one state the gate must not create. A release
    presses nothing and fires nothing, so letting it out keeps the point of the gate. Only a
-   forward, and only for a control the twin has down: a key pressed during the recording never
-   reached it, so its up is dropped like everything else. A forward is enough to look at
-   because matcher.c swallows an up only when it swallowed the down (button_up's and
-   handle_modifier's fired branches): every up a twin is owed arrives as TC_FORWARD. If that
-   ever changes, a key can stick. */
+   forward or a synthesised up, and only for a control the twin has down: a key pressed during
+   the recording never reached it, so its up is dropped like everything else. Those two kinds
+   are enough to look at because matcher.c swallows an up only when it swallowed the down
+   (button_up's and handle_modifier's fired branches), and the one up it synthesises — a
+   tap's, TC_TAP_MS after its down — is owed by construction once that down went out: every
+   up a twin is owed arrives as TC_FORWARD or TC_SYNTH. If that ever changes, a key can
+   stick. */
 static bool owed_release(tc_decision d) {
-    if (d.kind != TC_FORWARD || d.ev.value != 0 || d.ev.dev >= 2) return false;
+    if ((d.kind != TC_FORWARD && d.kind != TC_SYNTH) || d.ev.value != 0 || d.ev.dev >= 2) {
+        return false;
+    }
     if (d.ev.type == TC_EV_KEY) {
         return d.ev.code <= KEY_MAX && g_twin_key_down[d.ev.dev][d.ev.code];
     }
@@ -236,7 +240,7 @@ static bool owed_release(tc_decision d) {
    a missing FORWARD is a button that no longer works.
 
    While the app records a trigger (capture mode) nothing leaves the helper but the panic and
-   a release a twin is owed (owed_release): no forward, no synthesised tap, no fire. The matcher
+   a release a twin is owed (owed_release): no forward, no synthesised down, no fire. The matcher
    is still fed every event and every tick, so the panic combo keeps working with the gate shut
    and the matcher's picture of what is held stays true to the keys when the mode switches
    back. Three things the gate does not undo, accepted: a key whose down never reached the twin

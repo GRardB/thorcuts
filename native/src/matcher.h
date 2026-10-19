@@ -12,7 +12,9 @@
  * session is handed to the game (pass-through) so a modifier's normal job survives —
  * as it is when the modifiers are held alone past TC_LONE_MS with nothing armed, so
  * a long press reaches the system as a long press and not as a tap on the release.
- * The invariant every decision serves: a down's fate decides its up's fate.
+ * A tap the game IS owed goes out with a width: its down on the release, its up
+ * TC_TAP_MS later. The invariant every decision serves: a down's fate decides its
+ * up's fate.
  *
  * Pure: no syscalls, no allocation, no time of its own. main.c feeds events and
  * TC_EV_TICKs and emits the decisions. Host-tested in test/test_matcher.c.
@@ -64,9 +66,17 @@ enum {
    Design: docs/superpowers/specs/2026-10-18-m6-follow-ups-design.md §3. */
 #define TC_LONE_MS 500
 
+/* A synthesised tap has a width: its down goes out on the modifier's release and its
+   up this much later, on a tick. A down and an up in one report are a press of no
+   width — the kernel stamps them alike — and a game that samples the pad once a frame
+   (every emulator) never sees it, though the system's own key handlers do. 50 ms
+   clears a frame at 30 fps with room; the cost is only that the game's release lags
+   the thumb's by this much. Tunable; not a setting. */
+#define TC_TAP_MS 50
+
 /* Bounds. A pass-through emits at most 5 modifier downs + TC_MAX_PRESSED button
-   downs, plus the event itself and a tap's second half: 16 holds the worst case,
-   and test_matcher.c provokes it. */
+   downs, plus the event itself and the tap's up a re-press flushes first: 16 holds
+   the worst case, and test_matcher.c provokes it. */
 #define TC_MAX_DECISIONS 16
 #define TC_MAX_PRESSED   8
 #define TC_MAX_AXES      (TC_MAX_RULES * TC_MAX_BUTTONS)
@@ -137,6 +147,11 @@ typedef struct {
     int64_t    hold_deadline_ms;  /* -1 = none */
     int64_t    lone_deadline_ms;  /* TC_LONE_MS after the last modifier down with nothing
                                      else to wait for; -1 = none */
+
+    /* Taps whose up is still owed, by TC_MOD_* index: the absolute ms at which the
+       synthesised up goes out, or -1. Outlives the session that tapped; a real down
+       of the same key flushes it first. */
+    int64_t    tap_up_ms[TC_MOD_COUNT];
 
     /* The panic combo, tracked from raw events whatever the table says. */
     bool    home_held;

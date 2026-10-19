@@ -77,6 +77,7 @@ void tc_init(tc_state *s) {
     s->hold_deadline_ms = -1;
     s->lone_deadline_ms = -1;
     s->panic_deadline_ms = -1;
+    for (int m = 0; m < TC_MOD_COUNT; m++) s->tap_up_ms[m] = -1;
 }
 
 tc_set_result tc_matcher_set_table(tc_state *s, const tc_table *t) {
@@ -97,6 +98,32 @@ static void disarm(tc_state *s) {
     s->armed = -1;
     s->hold_deadline_ms = -1;
     s->lone_deadline_ms = -1;
+}
+
+/* ---- synthesised taps ---- */
+
+/* The up a tapped modifier's twin is owed, if one is: push it and forget it. */
+static void flush_tap_up(tc_state *s, tc_out *o, int m) {
+    if (s->tap_up_ms[m] < 0) return;
+    push(o, TC_SYNTH, ev_of(tc_modifier_controls[m], 0));
+    s->tap_up_ms[m] = -1;
+}
+
+/* A real down of one of the five keys while its tap's up is still owed: the up goes
+   out first, so the twin never sees a second down on a key it has down, and the up
+   never lands inside — or after — whatever this press turns into. Checked against the
+   five keys and not the table's modifiers: the table may have changed since the tap. */
+static void flush_tap_up_of(tc_state *s, tc_out *o, tc_event ev) {
+    for (int m = 0; m < TC_MOD_COUNT; m++) {
+        tc_control c = tc_modifier_controls[m];
+        if (ev.dev == c.dev && ev.code == c.code) flush_tap_up(s, o, m);
+    }
+}
+
+static int64_t earliest_tap_up(const tc_state *s) {
+    int64_t t = -1;
+    for (int m = 0; m < TC_MOD_COUNT; m++) t = earlier(t, s->tap_up_ms[m]);
+    return t;
 }
 
 /* The session is waiting on nothing but its modifiers: give the game the hold at
@@ -344,10 +371,12 @@ static void handle_modifier(tc_state *s, tc_out *o, tc_event ev, int m, int64_t 
             push(o, TC_SWALLOW, ev);
             return;
         }
-        /* a tap: the job the system was waiting for, deferred to release */
+        /* a tap: the job the system was waiting for, deferred to release. The down
+           now; the up on the tick TC_TAP_MS from now, so the press has a width a game
+           that samples the pad once a frame can see. */
         s->held &= (uint8_t)~bit;
         push(o, TC_SYNTH, ev_of(tc_modifier_controls[m], 1));
-        push(o, TC_SYNTH, ev_of(tc_modifier_controls[m], 0));
+        s->tap_up_ms[m] = now_ms + TC_TAP_MS;
         evaluate(s, o, now_ms);  /* a bare HOLD on what is still held may arm */
         return;
     }
@@ -438,11 +467,16 @@ tc_out tc_step(tc_state *s, tc_event ev, int64_t now_ms) {
     }
 
     if (ev.type == TC_EV_TICK) {
+        /* The oldest debts first: every tap whose up is due. */
+        for (int m = 0; m < TC_MOD_COUNT; m++) {
+            if (s->tap_up_ms[m] >= 0 && now_ms >= s->tap_up_ms[m]) flush_tap_up(s, &o, m);
+        }
         if (s->armed >= 0 && now_ms >= s->hold_deadline_ms) fire(s, &o, s->armed);
         /* The lone-modifier window closed with nothing decided: the game gets the
            hold, live, and the session with it. Exclusive with an armed HOLD. */
         if (s->lone_deadline_ms >= 0 && now_ms >= s->lone_deadline_ms) pass_through(s, &o);
     } else if (ev.type == TC_EV_KEY) {
+        if (ev.value == 1) flush_tap_up_of(s, &o, ev);
         int m = modifier_of(s, ev);
         if (m >= 0) {
             handle_modifier(s, &o, ev, m, now_ms);
@@ -476,7 +510,8 @@ tc_out tc_step(tc_state *s, tc_event ev, int64_t now_ms) {
         }
     }
 
-    o.deadline_ms = earlier(earlier(s->hold_deadline_ms, s->lone_deadline_ms),
-                            s->panic_deadline_ms);
+    o.deadline_ms = earlier(earlier(earlier(s->hold_deadline_ms, s->lone_deadline_ms),
+                                    s->panic_deadline_ms),
+                            earliest_tap_up(s));
     return o;
 }
