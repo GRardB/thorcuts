@@ -74,6 +74,7 @@ class ThorcutsCoordinatorTest {
         homePackages = { emptySet() },
         launchComponent = { null },
         screenshots = FakeScreenshots(),
+        focusLock = { null },
         log = log,
         privileged = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         storeDispatcher = Dispatchers.Unconfined,

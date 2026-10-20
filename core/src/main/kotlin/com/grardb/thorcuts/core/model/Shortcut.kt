@@ -44,9 +44,10 @@ data class Trigger(
 }
 
 /**
- * Which screen an action aims at. FOCUSED is resolved when the action RUNS, from the
- * window state at that moment: a fired rule arrives with no screen context of its own.
- * BOTH is both screens, each on its own; only an action that says so takes it —
+ * Which screen an action aims at. FOCUSED is resolved when the action RUNS — from the Thor's
+ * Focus Mode when it locks the controller to a screen, else from the window state at that
+ * moment (the Focus Mode spec, 2026-10-20): a fired rule arrives with no screen context of its
+ * own. BOTH is both screens, each on its own; only an action that says so takes it —
  * [Action.Brightness] and [Action.CloseAllApps] — and the four screen actions below refuse
  * it in their `init`, so a hand-written file cannot aim them at both (brightness spec,
  * 2026-10-20).

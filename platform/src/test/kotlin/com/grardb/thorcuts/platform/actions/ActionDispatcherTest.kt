@@ -20,10 +20,13 @@ class ActionDispatcherTest {
 
     private val tool = "com.grardb.thorcuts.platform.tasks.TaskTool"
 
-    private fun dispatcher(g: FakeGateway, shots: FakeScreenshots = FakeScreenshots()) =
-        ActionDispatcher(
-            TaskActions(g, { setOf("c.home") }, { pkg -> "$pkg/.MainActivity" }, shots),
-        )
+    private fun dispatcher(
+        g: FakeGateway,
+        shots: FakeScreenshots = FakeScreenshots(),
+        lock: () -> ScreenTarget? = { null },
+    ) = ActionDispatcher(
+        TaskActions(g, { setOf("c.home") }, { pkg -> "$pkg/.MainActivity" }, shots, lock),
+    )
 
     private fun entryPoint(vararg args: String): Call = Call.EntryPoint(tool, args.toList())
 
@@ -131,5 +134,18 @@ class ActionDispatcherTest {
             dispatcher(g).dispatch(Action.Brightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH)),
         )
         assertEquals(listOf(entryPoint("brightness", "both", "INCREASE", "10")), g.calls)
+    }
+
+    @Test
+    fun `a FOCUSED action under a Focus Mode lock reaches the tool with that screen's display id`() {
+        // The lock is applied inside TaskActions; this pins that the dispatcher's path goes
+        // through it — once, for one action; TaskActionsTest covers every method.
+        val g = FakeGateway("OK closed 12@0 com.example")
+        assertEquals(
+            "OK closed 12@0 com.example",
+            dispatcher(g, lock = { ScreenTarget.TOP })
+                .dispatch(Action.CloseScreen(ScreenTarget.FOCUSED)),
+        )
+        assertEquals(listOf(entryPoint("close", "0", "c.home")), g.calls)
     }
 }

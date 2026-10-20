@@ -67,6 +67,7 @@ class ThorcutsCoordinatorQueuedTest {
         homePackages = { emptySet() },
         launchComponent = { null },
         screenshots = FakeScreenshots(),
+        focusLock = { null },
         log = log,
         privileged = privileged,
         storeDispatcher = storeDispatcher,

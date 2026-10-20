@@ -52,6 +52,7 @@ class ThorcutsViewModelTest {
         homePackages = { emptySet() },
         launchComponent = { null },
         screenshots = FakeScreenshots(),
+        focusLock = { null },
         log = RecordingLogger(),
         privileged = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
         storeDispatcher = Dispatchers.Unconfined,

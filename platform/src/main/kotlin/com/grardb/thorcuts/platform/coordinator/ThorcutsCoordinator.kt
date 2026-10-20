@@ -9,6 +9,7 @@ import com.grardb.thorcuts.core.config.MergeResult
 import com.grardb.thorcuts.core.config.ThorcutsConfig
 import com.grardb.thorcuts.core.helper.HelperMessage
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.recorder.TriggerRecorder
 import com.grardb.thorcuts.core.rules.FireResolution
 import com.grardb.thorcuts.platform.actions.ActionDispatcher
@@ -171,6 +172,9 @@ class ThorcutsCoordinator(
     launchComponent: (String) -> String?,
     /** The bottom screenshot's gallery and toast; see [TaskActions]. */
     screenshots: Screenshots,
+    /** Which screen the Thor's Focus Mode locks the controller to, or null on Auto-lock; see
+     *  [TaskActions]. */
+    focusLock: () -> ScreenTarget?,
     private val log: Logger,
     /** Where the blocking privileged work and the fires run: Privilege.scope. A test passes
      *  an Unconfined scope so everything runs inline. */
@@ -180,7 +184,8 @@ class ThorcutsCoordinator(
     /** Monotonic milliseconds, for the relaunch chain. A test passes its own. */
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
-    private val tasks: TaskActions = TaskActions(gateway, homePackages, launchComponent, screenshots)
+    private val tasks: TaskActions =
+        TaskActions(gateway, homePackages, launchComponent, screenshots, focusLock)
     private val dispatcher = ActionDispatcher(tasks)
     private val helper: HelperChannel = channel(::onHelperMessage)
 

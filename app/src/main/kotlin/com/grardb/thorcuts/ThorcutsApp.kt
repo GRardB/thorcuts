@@ -10,6 +10,7 @@ import com.grardb.thorcuts.platform.log.AndroidLogger
 import com.grardb.thorcuts.platform.privilege.PserviceGateway
 import com.grardb.thorcuts.platform.tasks.GalleryScreenshots
 import com.grardb.thorcuts.platform.tasks.HomePackages
+import com.grardb.thorcuts.platform.tasks.ThorFocusLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,6 +60,9 @@ class ThorcutsApp : Application() {
             // The bottom screenshot's gallery, toast and click (M7); the top screen's is
             // Android's own.
             screenshots = GalleryScreenshots(this),
+            // The Thor's Focus Mode, read on every fire aimed at the focused screen: the locked
+            // screen, or null on Auto-lock (then the tool's focused root task decides).
+            focusLock = { ThorFocusLock.read(contentResolver) },
             log = AndroidLogger("ThorcutsCoord"),
         )
     }

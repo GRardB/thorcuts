@@ -31,12 +31,20 @@ import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
  * [screenshots] is the bottom screenshot's Android boundary (M7 spec §6): where the root
  * script leaves the PNG, the save into the gallery, the toast. Asked only on the bottom
  * path; the top screen's screenshot is Android's own and needs no help from the app.
+ *
+ * [focusLock] answers "which screen does the Thor's Focus Mode lock the controller to" — TOP,
+ * BOTTOM, or null on Auto-lock, as `ThorFocusLock.read` reads the quick panel's setting — and
+ * is asked on every fire aimed at FOCUSED, so the quick panel is honoured by the next combo.
+ * Under a lock a FOCUSED action runs exactly as its TOP or BOTTOM variant; on Auto-lock the
+ * tool resolves `focused` from the window manager's focused root task, as before (the Focus
+ * Mode spec, 2026-10-20). See [aimed].
  */
 class TaskActions(
     private val gateway: PrivilegeGateway,
     private val homePackages: () -> Set<String>,
     private val launchComponent: (String) -> String?,
     private val screenshots: Screenshots,
+    private val focusLock: () -> ScreenTarget?,
 ) {
 
     /** Every task with its display and visibility, plus the focused one, for diagnostics;
@@ -54,8 +62,9 @@ class TaskActions(
      * screen so the tool refuses them by name (a launcher relaunched as an ordinary task
      * passes its app predicate; measured). The names come from [withLaunchers].
      */
-    fun closeScreen(screen: ScreenTarget): String =
-        withLaunchers { tool("close", screenArg(screen), *it) }
+    fun closeScreen(screen: ScreenTarget): String = aimed(screen) { s ->
+        withLaunchers { tool("close", screenArg(s), *it) }
+    }
 
     /**
      * Close every app on [screen], or on both screens: the tool's `closeall`, with the
@@ -66,8 +75,9 @@ class TaskActions(
      * `display <id>: nothing to close`, then `failed <pkg>: <reason>` per failure — `OK` when
      * no part failed, `ERR` otherwise.
      */
-    fun closeAllApps(screen: ScreenTarget): String =
-        withLaunchers { tool("closeall", screenArg(screen), *it) }
+    fun closeAllApps(screen: ScreenTarget): String = aimed(screen) { s ->
+        withLaunchers { tool("closeall", screenArg(s), *it) }
+    }
 
     /**
      * The launcher packages — HOME and SECONDARY_HOME, as [homePackages] resolves them —
@@ -92,8 +102,10 @@ class TaskActions(
         return call(args.toTypedArray())
     }
 
-    /** Send the focused screen's app to the other screen: the tool's `move`. */
-    fun moveFocusedToOtherScreen(): String = tool("move", FOCUSED, TOP, BOTTOM)
+    /** Send the focused screen's app to the other screen: the tool's `move`, from the screen
+     *  FOCUSED means right now ([aimed]: the locked screen, or the tool's `focused`). */
+    fun moveFocusedToOtherScreen(): String =
+        aimed(ScreenTarget.FOCUSED) { s -> tool("move", screenArg(s), TOP, BOTTOM) }
 
     /**
      * Go home on [screen] by sending a Home key for that display.
@@ -102,17 +114,18 @@ class TaskActions(
      * → `startHomeOnDisplay`), which picks HOME for the default display and
      * SECONDARY_HOME for the other — two packages register SECONDARY_HOME on this device
      * (M1), so an implicit `am start -c HOME` would hit a chooser or start the wrong
-     * launcher. For FOCUSED the key carries no display: the start-home path resolves
-     * that to the top focused display itself, so this is exactly the physical Home
-     * button and needs no round trip to the tool. `input` prints nothing on success and
-     * its usage text on a bad argument, which is how the two lines below are told apart.
+     * launcher. For FOCUSED on Auto-lock the key carries no display: the start-home path
+     * resolves that to the top focused display itself, so this is exactly the physical Home
+     * button and needs no round trip to the tool; under a Focus Mode lock [aimed] has already
+     * made it TOP or BOTTOM, and the key names that display. `input` prints nothing on success
+     * and its usage text on a bad argument, which is how the two lines below are told apart.
      */
-    fun goHome(screen: ScreenTarget): String {
-        val focused = screen == ScreenTarget.FOCUSED
-        val option = if (focused) "" else "-d ${screenArg(screen)} "
-        val where = if (focused) "the focused display" else "display ${screenArg(screen)}"
-        val out = shell("input ${option}keyevent KEYCODE_HOME") ?: return NO_REPLY
-        return if (out.isEmpty()) "OK home sent to $where" else "ERR input: $out"
+    fun goHome(screen: ScreenTarget): String = aimed(screen) { s ->
+        val focused = s == ScreenTarget.FOCUSED
+        val option = if (focused) "" else "-d ${screenArg(s)} "
+        val where = if (focused) "the focused display" else "display ${screenArg(s)}"
+        val out = shell("input ${option}keyevent KEYCODE_HOME") ?: return@aimed NO_REPLY
+        if (out.isEmpty()) "OK home sent to $where" else "ERR input: $out"
     }
 
     /**
@@ -121,31 +134,32 @@ class TaskActions(
      * an Activity — exactly when a shortcut needs it) does not apply. The component is
      * resolved first ([launchComponent]: a package with none, a resolver that throws — it is
      * a binder call — or a name that is not a component is answered as a line, and nothing
-     * runs), then for FOCUSED the tool is asked which display: two round trips, serialised
-     * on the one thread. `am` prints `Starting: Intent {…}` first and an `Error: …` or a
+     * runs), then for FOCUSED on Auto-lock the tool is asked which display: two round trips,
+     * serialised on the one thread — under a Focus Mode lock [aimed] has made it TOP or BOTTOM
+     * and there is one. `am` prints `Starting: Intent {…}` first and an `Error: …` or a
      * "brought to the front" warning on later lines; pservice returns one line, so the
      * script folds them and this classifies: `Error` or `Exception` anywhere in the output
      * is a failure (a Java trace from `am` has no `Error:` line). A positive `Starting:`
      * test would not do — `am` prints it BEFORE it tries, so a failed start begins with it
      * too.
      */
-    fun openApp(packageName: String, screen: ScreenTarget): String {
+    fun openApp(packageName: String, screen: ScreenTarget): String = aimed(screen) { s ->
         val component = try {
             launchComponent(packageName)
         } catch (e: RuntimeException) {
-            return "ERR launch activity: $e"
-        } ?: return "ERR no launch activity for $packageName"
+            return@aimed "ERR launch activity: $e"
+        } ?: return@aimed "ERR no launch activity for $packageName"
         val componentArg = CommandSafety.componentArg(component)
-            ?: return "ERR not a component name: '$component'"
-        val display = if (screen == ScreenTarget.FOCUSED) {
+            ?: return@aimed "ERR not a component name: '$component'"
+        val display = if (s == ScreenTarget.FOCUSED) {
             val d = focusedDisplay()
-            if (d.startsWith("ERR ")) return d
+            if (d.startsWith("ERR ")) return@aimed d
             d
         } else {
-            screenArg(screen)
+            screenArg(s)
         }
-        val out = shell("am start --display $display -n $componentArg") ?: return NO_REPLY
-        return if ("Error" in out || "Exception" in out) "ERR am: $out"
+        val out = shell("am start --display $display -n $componentArg") ?: return@aimed NO_REPLY
+        if ("Error" in out || "Exception" in out) "ERR am: $out"
         else "OK display $display: $out"
     }
 
@@ -156,24 +170,27 @@ class TaskActions(
      * that screen (its screenshot is hard-wired to the default display), so a root `screencap`
      * on the bottom's physical id writes a PNG into the app's cache, [screenshots] files it
      * into the gallery, and EVERY outcome of that path — the save's line or any failure before
-     * it — goes to [Screenshots.notify], the toast. FOCUSED asks the tool which display holds
-     * focus, as [openApp] does, and takes that screen's path.
+     * it — goes to [Screenshots.notify], the toast. FOCUSED on Auto-lock asks the tool which
+     * display holds focus, as [openApp] does, and takes that screen's path; under a Focus Mode
+     * lock [aimed] has made it TOP or BOTTOM already.
      */
-    fun takeScreenshot(screen: ScreenTarget): String = when (screen) {
-        ScreenTarget.TOP -> screenshotKey()
-        ScreenTarget.BOTTOM -> bottomScreenshot()
-        ScreenTarget.FOCUSED -> {
-            val d = focusedDisplay()
-            when {
-                d.startsWith("ERR ") -> d
-                d == TOP -> screenshotKey()
-                d == BOTTOM -> bottomScreenshot()
-                else -> "ERR unexpected focused display $d"
+    fun takeScreenshot(screen: ScreenTarget): String = aimed(screen) { s ->
+        when (s) {
+            ScreenTarget.TOP -> screenshotKey()
+            ScreenTarget.BOTTOM -> bottomScreenshot()
+            ScreenTarget.FOCUSED -> {
+                val d = focusedDisplay()
+                when {
+                    d.startsWith("ERR ") -> d
+                    d == TOP -> screenshotKey()
+                    d == BOTTOM -> bottomScreenshot()
+                    else -> "ERR unexpected focused display $d"
+                }
             }
+            // The model refuses BOTH on this action (brightness spec §2); the branch is the
+            // compiler's, not a path.
+            ScreenTarget.BOTH -> error("TakeScreenshot cannot aim at both screens")
         }
-        // The model refuses BOTH on this action (brightness spec §2); the branch is the
-        // compiler's, not a path.
-        ScreenTarget.BOTH -> error("TakeScreenshot cannot aim at both screens")
     }
 
     /**
@@ -187,7 +204,7 @@ class TaskActions(
      * <id>: <reason>`, `OK` when every part succeeded and `ERR` otherwise.
      */
     fun changeBrightness(mode: BrightnessMode, percent: Int, screen: ScreenTarget): String =
-        tool("brightness", screenArg(screen), mode.name, percent.toString())
+        aimed(screen) { s -> tool("brightness", screenArg(s), mode.name, percent.toString()) }
 
     /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
     private fun screenshotKey(): String {
@@ -223,13 +240,34 @@ class TaskActions(
     /**
      * The display that holds input focus, as the tool's `focused` line reports it: its id
      * (`"0"`, `"4"`), or an `ERR …` line to return as is — the tool's own, or one naming a
-     * `focused` line this cannot read. Shared by [openApp] and [takeScreenshot].
+     * `focused` line this cannot read. Shared by [openApp] and [takeScreenshot], on Auto-lock
+     * only: under a Focus Mode lock [aimed] never lets FOCUSED reach them.
      */
     private fun focusedDisplay(): String {
         val line = tool("focused")
         if (!line.startsWith("OK ")) return line
         return FOCUSED_DISPLAY.find(line)?.groupValues?.get(1)
             ?: "ERR unexpected focused line: $line"
+    }
+
+    /**
+     * Run [call] on the screen [screen] means right now. TOP, BOTTOM and BOTH are themselves.
+     * FOCUSED is the screen the Thor's Focus Mode locks the controller to ([focusLock]: TOP or
+     * BOTTOM), so that under a lock the action is exactly its TOP or BOTTOM variant — or, on
+     * Auto-lock, FOCUSED itself, which the tool resolves from the window manager's focused root
+     * task (or [focusedDisplay] asks it to), as every FOCUSED action did before Focus Mode was
+     * honoured (2026-10-20). Asked on every call, never cached. A lock that throws — it is a
+     * settings read — is answered as a line and nothing runs: a default screen here would be
+     * the silent default this class forbids.
+     */
+    private fun aimed(screen: ScreenTarget, call: (ScreenTarget) -> String): String {
+        if (screen != ScreenTarget.FOCUSED) return call(screen)
+        val locked = try {
+            focusLock()
+        } catch (e: RuntimeException) {
+            return "ERR focus mode: $e"
+        }
+        return call(locked ?: screen)
     }
 
     private fun tool(vararg args: String): String {
@@ -248,7 +286,7 @@ class TaskActions(
     private fun screenArg(screen: ScreenTarget): String = when (screen) {
         ScreenTarget.TOP -> TOP
         ScreenTarget.BOTTOM -> BOTTOM
-        ScreenTarget.FOCUSED -> FOCUSED
+        ScreenTarget.FOCUSED -> FOCUSED   // only on Auto-lock: see aimed
         // Brightness and close-all send this word; the model refuses BOTH on every other action.
         ScreenTarget.BOTH -> BOTH_DISPLAYS
     }

@@ -26,13 +26,16 @@ class TaskActionsTest {
     private fun script(command: String): Call =
         Call.Script(listOf("$command 2>&1 | tr '\\n' ' '"))
 
-    /** One launcher by default: with none resolved, close refuses before it reaches the tool. */
+    /** One launcher by default: with none resolved, close refuses before it reaches the tool.
+     *  [lock] is Focus Mode as the app reads it; null is Auto-lock, so every test that does not
+     *  pass one — the existing FOCUSED tests included — is the Auto-lock case. */
     private fun actions(
         g: FakeGateway,
         launchers: Set<String> = setOf("c.launcher"),
         resolve: (String) -> String? = mainOf,
         shots: FakeScreenshots = FakeScreenshots(),
-    ) = TaskActions(g, { launchers }, resolve, shots)
+        lock: () -> ScreenTarget? = { null },
+    ) = TaskActions(g, { launchers }, resolve, shots, lock)
 
     // ── the tool's subcommands ────────────────────────────────────────────────────────
 
@@ -80,7 +83,7 @@ class TaskActionsTest {
     fun `closeScreen asks for the launchers on every call`() {
         var asked = 0
         val g = FakeGateway("OK closed 1@0 a.b", "OK closed 2@0 a.b")
-        val a = TaskActions(g, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots())
+        val a = TaskActions(g, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots(), { null })
         a.closeScreen(ScreenTarget.TOP)
         a.closeScreen(ScreenTarget.TOP)
         assertEquals(2, asked)
@@ -95,6 +98,7 @@ class TaskActionsTest {
         val g = FakeGateway("OK closed 1@4 a.b")
         val a = TaskActions(
             g, { setOf("rip.moth.cocoonshell", "not a package; rm x") }, mainOf, FakeScreenshots(),
+            { null },
         )
         a.closeScreen(ScreenTarget.BOTTOM)
         assertEquals(listOf(entryPoint("close", "4", "rip.moth.cocoonshell")), g.calls)
@@ -103,7 +107,7 @@ class TaskActionsTest {
     @Test
     fun `closeScreen answers an ERR line when the launchers cannot be resolved`() {
         val g = FakeGateway()
-        val a = TaskActions(g, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots())
+        val a = TaskActions(g, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots(), { null })
         val line = a.closeScreen(ScreenTarget.BOTTOM)
         assertTrue(line.startsWith("ERR launchers: "), line)
         assertTrue(g.calls.isEmpty())                  // nothing reached the tool
@@ -114,7 +118,7 @@ class TaskActionsTest {
         // Every device has a HOME handler, so an empty resolution means the query failed —
         // and a close with no names would remove a launcher that happened to be the app.
         val g = FakeGateway()
-        val a = TaskActions(g, { emptySet() }, mainOf, FakeScreenshots())
+        val a = TaskActions(g, { emptySet() }, mainOf, FakeScreenshots(), { null })
         assertEquals("ERR launchers: none resolved; not closing", a.closeScreen(ScreenTarget.TOP))
         assertTrue(g.calls.isEmpty())
     }
@@ -410,6 +414,7 @@ class TaskActionsTest {
             { setOf("rip.moth.cocoonshell", "com.android.launcher3", "not a package; rm x") },
             mainOf,
             FakeScreenshots(),
+            { null },
         )
         a.closeAllApps(ScreenTarget.BOTTOM)
         assertEquals(
@@ -419,17 +424,17 @@ class TaskActionsTest {
         // Asked on every call, so a launcher change is honoured.
         var asked = 0
         val twice = FakeGateway("OK display 0: nothing to close", "OK display 0: nothing to close")
-        val b = TaskActions(twice, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots())
+        val b = TaskActions(twice, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots(), { null })
         b.closeAllApps(ScreenTarget.TOP)
         b.closeAllApps(ScreenTarget.TOP)
         assertEquals(2, asked)
         // A resolver that throws, or one that resolves nothing: a line, and nothing reaches
         // the tool — a closeall with no names would remove the launcher's relaunched task.
         val dead = FakeGateway()
-        val c = TaskActions(dead, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots())
+        val c = TaskActions(dead, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots(), { null })
         assertTrue(c.closeAllApps(ScreenTarget.TOP).startsWith("ERR launchers: "))
         val none = FakeGateway()
-        val d = TaskActions(none, { emptySet() }, mainOf, FakeScreenshots())
+        val d = TaskActions(none, { emptySet() }, mainOf, FakeScreenshots(), { null })
         assertEquals("ERR launchers: none resolved; not closing", d.closeAllApps(ScreenTarget.BOTH))
         assertTrue(dead.calls.isEmpty() && none.calls.isEmpty())
     }
@@ -568,6 +573,130 @@ class TaskActionsTest {
             assertEquals(1, lines.size)
             assertTrue(CommandSafety.isSingleLine(lines.single()), lines.single())
         }
+    }
+
+    // ── Focus Mode: FOCUSED under a lock is the TOP or BOTTOM variant, one round trip ──
+
+    private val lockedTop: () -> ScreenTarget? = { ScreenTarget.TOP }
+    private val lockedBottom: () -> ScreenTarget? = { ScreenTarget.BOTTOM }
+
+    @Test
+    fun `closeScreen FOCUSED under a Top lock sends the top's display id, not the focused word`() {
+        val g = FakeGateway("OK closed 12@0 com.example")
+        assertEquals(
+            "OK closed 12@0 com.example",
+            actions(g, lock = lockedTop).closeScreen(ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(entryPoint("close", "0", "c.launcher")), g.calls)
+    }
+
+    @Test
+    fun `closeAllApps FOCUSED under a Top lock sends the top's display id`() {
+        val g = FakeGateway("OK display 0: closed 1 (com.a)")
+        assertEquals(
+            "OK display 0: closed 1 (com.a)",
+            actions(g, lock = lockedTop).closeAllApps(ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(entryPoint("closeall", "0", "c.launcher")), g.calls)
+    }
+
+    @Test
+    fun `moveFocusedToOtherScreen under a Top lock moves from the top`() {
+        val g = FakeGateway("OK moved 12@0 -> 4; display 4 had no app")
+        assertEquals(
+            "OK moved 12@0 -> 4; display 4 had no app",
+            actions(g, lock = lockedTop).moveFocusedToOtherScreen(),
+        )
+        assertEquals(listOf(entryPoint("move", "0", "0", "4")), g.calls)
+    }
+
+    @Test
+    fun `changeBrightness FOCUSED under a Top lock sends the top's display id`() {
+        val g = FakeGateway("OK display 0: 35% -> 45%")
+        assertEquals(
+            "OK display 0: 35% -> 45%",
+            actions(g, lock = lockedTop)
+                .changeBrightness(BrightnessMode.INCREASE, 10, ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(brightness("0", BrightnessMode.INCREASE, 10)), g.calls)
+    }
+
+    @Test
+    fun `goHome FOCUSED under a Top lock sends the key for display 0`() {
+        val g = FakeGateway("")
+        assertEquals(
+            "OK home sent to display 0",
+            actions(g, lock = lockedTop).goHome(ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(script("input -d 0 keyevent KEYCODE_HOME")), g.calls)
+    }
+
+    @Test
+    fun `openApp FOCUSED under a Top lock starts on display 0 in one call, never asking the tool`() {
+        val g = FakeGateway("Starting: Intent { } ")
+        assertEquals(
+            "OK display 0: Starting: Intent { }",
+            actions(g, lock = lockedTop).openApp(thorcuts, ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(script("am start --display 0 -n $quotedMain")), g.calls)
+    }
+
+    @Test
+    fun `takeScreenshot FOCUSED under a Top lock sends the key and nothing else`() {
+        val g = FakeGateway("")
+        val shots = FakeScreenshots()
+        assertEquals(
+            "OK screenshot key sent",
+            actions(g, shots = shots, lock = lockedTop).takeScreenshot(ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(script("input keyevent KEYCODE_SYSRQ")), g.calls)
+        assertTrue(shots.notified.isEmpty())
+    }
+
+    @Test
+    fun `takeScreenshot FOCUSED under a Bottom lock takes the bottom path, never asking the tool`() {
+        val g = FakeGateway("1236356 ")
+        val shots = FakeScreenshots()
+        val line = actions(g, shots = shots, lock = lockedBottom)
+            .takeScreenshot(ScreenTarget.FOCUSED)
+        assertEquals("OK saved Pictures/Screenshots/Screenshot_20261019-182426_bottom.png", line)
+        assertEquals(listOf(bottomScript()), g.calls)
+        assertEquals(listOf(line), shots.notified)
+    }
+
+    @Test
+    fun `a lock that throws is an ERR line, and nothing reaches the gateway`() {
+        val g = FakeGateway()
+        val a = actions(g, lock = { throw IllegalStateException("settings dead") })
+        assertEquals(
+            "ERR focus mode: java.lang.IllegalStateException: settings dead",
+            a.closeScreen(ScreenTarget.FOCUSED),
+        )
+        assertTrue(g.calls.isEmpty())
+    }
+
+    @Test
+    fun `the lock is asked on every FOCUSED call and never for a named screen`() {
+        var asked = 0
+        val g = FakeGateway(
+            "OK closed 1@0 a",                                   // closeScreen(TOP)
+            "",                                                  // goHome(BOTTOM)
+            "OK display 0: 50% -> 50%, display 4: 50% -> 50%",   // changeBrightness(BOTH)
+            "OK closed 2@4 b",                                   // closeScreen(FOCUSED)
+            "OK closed 3@4 b",                                   // closeScreen(FOCUSED)
+        )
+        val a = actions(g, lock = { asked++; ScreenTarget.BOTTOM })
+        a.closeScreen(ScreenTarget.TOP)
+        a.goHome(ScreenTarget.BOTTOM)
+        a.changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTH)
+        assertEquals(0, asked)
+        a.closeScreen(ScreenTarget.FOCUSED)
+        a.closeScreen(ScreenTarget.FOCUSED)
+        assertEquals(2, asked)
+        assertEquals(
+            listOf(entryPoint("close", "4", "c.launcher"), entryPoint("close", "4", "c.launcher")),
+            g.calls.takeLast(2),
+        )
     }
 
 }
