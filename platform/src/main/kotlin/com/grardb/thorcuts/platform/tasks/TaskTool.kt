@@ -394,8 +394,13 @@ object TaskTool {
         else listOf(resolveDisplay(atm, screen))
         val roots = rootTasks(atm)
         val remove = removeTaskMethod(atm)
-        val parts = displays.map { display ->
-            val tasks = roots.filter { displayOf(it) == display && isAppTask(it) }
+        // Every reflective read before any removal: both displays' candidates are chosen
+        // first, so a reader that throws (main's catch, one bare ERR) cannot hide closes
+        // already made on the other display.
+        val candidates = displays.map { display ->
+            display to roots.filter { displayOf(it) == display && isAppTask(it) }
+        }
+        val parts = candidates.map { (display, tasks) ->
             closeAllPart(atm, remove, tasks, display, launchers)
         }
         val line = parts.joinToString(", ") { it.second }

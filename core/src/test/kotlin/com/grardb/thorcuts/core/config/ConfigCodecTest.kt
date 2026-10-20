@@ -376,6 +376,10 @@ class ConfigCodecTest {
                 """"kind":"CloseAllApps","screen":"TOP","mode":"SET"""",
             ) to "CloseAllApps takes no mode",
             swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"CloseAllApps","screen":"TOP","percent":10""",
+            ) to "CloseAllApps takes no percent",
+            swap.replace(
                 """"kind":"SwapScreens"""", """"kind":"Brightness","percent":10,"screen":"TOP"""",
             ) to "Brightness needs a mode",
             swap.replace(
