@@ -368,6 +368,73 @@ class TaskActionsTest {
     }
 
     @Test
+    fun `closeAllApps runs the tool's closeall once with the screen's word and the launchers, line verbatim`() {
+        val cases = mapOf(
+            ScreenTarget.TOP to ("0" to "OK display 0: closed 2 (com.a, com.b)"),
+            ScreenTarget.BOTTOM to ("4" to "OK display 4: nothing to close"),
+            ScreenTarget.FOCUSED to ("focused" to "OK display 4: closed 1 (com.a)"),
+            ScreenTarget.BOTH to
+                ("both" to "OK display 0: nothing to close, display 4: closed 1 (com.a)"),
+        )
+        for ((screen, case) in cases) {
+            val (word, line) = case
+            val g = FakeGateway(line)
+            assertEquals(line, actions(g).closeAllApps(screen))
+            assertEquals(listOf(entryPoint("closeall", word, "c.launcher")), g.calls)
+        }
+    }
+
+    @Test
+    fun `closeAllApps passes the tool's ERR line through, and names a silent pservice`() {
+        val partial = "ERR display 0: closed 1 (com.a), failed com.b: removeTask(7) returned false"
+        assertEquals(partial, actions(FakeGateway(partial)).closeAllApps(ScreenTarget.TOP))
+        val unfocused = FakeGateway("ERR no focused root task")
+        assertEquals("ERR no focused root task", actions(unfocused).closeAllApps(ScreenTarget.FOCUSED))
+        assertEquals(listOf(entryPoint("closeall", "focused", "c.launcher")), unfocused.calls)
+        assertEquals(
+            "ERR no reply from pservice",
+            actions(FakeGateway(null)).closeAllApps(ScreenTarget.BOTH),
+        )
+        assertEquals(
+            "ERR the tool printed no result line",
+            actions(FakeGateway(" ")).closeAllApps(ScreenTarget.BOTTOM),
+        )
+    }
+
+    @Test
+    fun `closeAllApps follows closeScreen's launcher rules - sorted packages, asked every call, refused when unresolved`() {
+        // Sorted, and only names that are packages.
+        val sorted = FakeGateway("OK display 4: nothing to close")
+        val a = TaskActions(
+            sorted,
+            { setOf("rip.moth.cocoonshell", "com.android.launcher3", "not a package; rm x") },
+            mainOf,
+            FakeScreenshots(),
+        )
+        a.closeAllApps(ScreenTarget.BOTTOM)
+        assertEquals(
+            listOf(entryPoint("closeall", "4", "com.android.launcher3", "rip.moth.cocoonshell")),
+            sorted.calls,
+        )
+        // Asked on every call, so a launcher change is honoured.
+        var asked = 0
+        val twice = FakeGateway("OK display 0: nothing to close", "OK display 0: nothing to close")
+        val b = TaskActions(twice, { asked++; setOf("c.launcher") }, mainOf, FakeScreenshots())
+        b.closeAllApps(ScreenTarget.TOP)
+        b.closeAllApps(ScreenTarget.TOP)
+        assertEquals(2, asked)
+        // A resolver that throws, or one that resolves nothing: a line, and nothing reaches
+        // the tool — a closeall with no names would remove the launcher's relaunched task.
+        val dead = FakeGateway()
+        val c = TaskActions(dead, { throw IllegalStateException("pm dead") }, mainOf, FakeScreenshots())
+        assertTrue(c.closeAllApps(ScreenTarget.TOP).startsWith("ERR launchers: "))
+        val none = FakeGateway()
+        val d = TaskActions(none, { emptySet() }, mainOf, FakeScreenshots())
+        assertEquals("ERR launchers: none resolved; not closing", d.closeAllApps(ScreenTarget.BOTH))
+        assertTrue(dead.calls.isEmpty() && none.calls.isEmpty())
+    }
+
+    @Test
     fun `openApp FOCUSED returns the tool's ERR line and starts nothing`() {
         val g = FakeGateway("ERR no focused root task")
         assertEquals("ERR no focused root task", actions(g).openApp(thorcuts, ScreenTarget.FOCUSED))
@@ -460,6 +527,7 @@ class TaskActionsTest {
         assertEquals(noReply, actions(FakeGateway(null)).listTasks())
         assertEquals(noReply, actions(FakeGateway(null)).swapScreens())
         assertEquals(noReply, actions(FakeGateway(null)).closeScreen(ScreenTarget.TOP))
+        assertEquals(noReply, actions(FakeGateway(null)).closeAllApps(ScreenTarget.BOTH))
         assertEquals(noReply, actions(FakeGateway(null)).moveFocusedToOtherScreen())
         assertEquals(noReply, actions(FakeGateway(null)).goHome(ScreenTarget.TOP))
         assertEquals(noReply, actions(FakeGateway(null)).openApp(thorcuts, ScreenTarget.TOP))
@@ -475,6 +543,7 @@ class TaskActionsTest {
         val noLine = "ERR the tool printed no result line"
         assertEquals(noLine, actions(FakeGateway("")).listTasks())
         assertEquals(noLine, actions(FakeGateway(" ")).closeScreen(ScreenTarget.TOP))
+        assertEquals(noLine, actions(FakeGateway("")).closeAllApps(ScreenTarget.FOCUSED))
         val g = FakeGateway("")
         assertEquals(noLine, actions(g).openApp(thorcuts, ScreenTarget.FOCUSED))
         assertEquals(listOf(entryPoint("focused")), g.calls)   // and am never ran

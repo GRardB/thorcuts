@@ -52,16 +52,36 @@ class TaskActions(
     /**
      * Close the app on [screen]: the tool's `close`, with the launcher packages after the
      * screen so the tool refuses them by name (a launcher relaunched as an ordinary task
-     * passes its app predicate; measured). Resolved on every call; filtered by the package
-     * rule here as well as in `HomePackages`, because what reaches a root shell is validated
-     * at the boundary that reaches it, unconditionally; sorted, so the command is
-     * deterministic; the gateway quotes them like every argument. A resolver that throws —
-     * it is a binder call — or a set that is EMPTY once filtered (every device has a HOME
-     * handler, so empty means the query failed, or the names were not packages) is answered
-     * as a line, and nothing is closed: passing no names would be the silent default this
-     * class forbids.
+     * passes its app predicate; measured). The names come from [withLaunchers].
      */
-    fun closeScreen(screen: ScreenTarget): String {
+    fun closeScreen(screen: ScreenTarget): String =
+        withLaunchers { tool("close", screenArg(screen), *it) }
+
+    /**
+     * Close every app on [screen], or on both screens: the tool's `closeall`, with the
+     * launcher packages after the screen so the tool skips them by name (the close-all spec,
+     * 2026-10-20). ONE round trip whichever screen: the tool resolves `focused` itself and does
+     * `both` back to back inside its one process, as it does for brightness. Its line is
+     * returned verbatim: one part per display — `display <id>: closed <n> (<pkg>, …)` or
+     * `display <id>: nothing to close`, then `failed <pkg>: <reason>` per failure — `OK` when
+     * no part failed, `ERR` otherwise.
+     */
+    fun closeAllApps(screen: ScreenTarget): String =
+        withLaunchers { tool("closeall", screenArg(screen), *it) }
+
+    /**
+     * The launcher packages — HOME and SECONDARY_HOME, as [homePackages] resolves them —
+     * handed to [call] as the tool arguments that follow a close's screen, or the `ERR
+     * launchers: …` line to return instead, with nothing closed. Resolved on every call, so a
+     * launcher change is honoured; filtered by the package rule here as well as in
+     * `HomePackages`, because what reaches a root shell is validated at the boundary that
+     * reaches it, unconditionally; sorted, so the command is deterministic; the gateway quotes
+     * them like every argument. A resolver that throws — it is a binder call — or a set that
+     * is EMPTY once filtered (every device has a HOME handler, so empty means the query failed,
+     * or the names were not packages) is answered as a line: passing no names would be the
+     * silent default this class forbids.
+     */
+    private fun withLaunchers(call: (Array<String>) -> String): String {
         val launchers = try {
             homePackages()
         } catch (e: RuntimeException) {
@@ -69,7 +89,7 @@ class TaskActions(
         }
         val args = launchers.filter { CommandSafety.isPackage(it) }.sorted()
         if (args.isEmpty()) return "ERR launchers: none resolved; not closing"
-        return tool("close", screenArg(screen), *args.toTypedArray())
+        return call(args.toTypedArray())
     }
 
     /** Send the focused screen's app to the other screen: the tool's `move`. */
@@ -229,7 +249,7 @@ class TaskActions(
         ScreenTarget.TOP -> TOP
         ScreenTarget.BOTTOM -> BOTTOM
         ScreenTarget.FOCUSED -> FOCUSED
-        // Only brightness sends this word; the model refuses BOTH on every other action.
+        // Brightness and close-all send this word; the model refuses BOTH on every other action.
         ScreenTarget.BOTH -> BOTH_DISPLAYS
     }
 
@@ -241,7 +261,7 @@ class TaskActions(
         /** The tool's word for "the display that holds input focus". */
         const val FOCUSED = "focused"
 
-        /** The tool's word for "the top then the bottom, in one process" (brightness only). */
+        /** The tool's word for "the top then the bottom, in one process" (brightness, close-all). */
         const val BOTH_DISPLAYS = "both"
         val TOP = ThorDisplays.TOP.toString()
         val BOTTOM = ThorDisplays.BOTTOM.toString()
