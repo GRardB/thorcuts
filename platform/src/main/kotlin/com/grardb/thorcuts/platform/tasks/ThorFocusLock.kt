@@ -25,8 +25,10 @@ object ThorFocusLock {
         else -> null
     }
 
-    /** The lock as the device holds it now. A missing key, or one that is not an int, reads as
-     *  the default 0: Auto-lock. */
+    /** The lock as the device holds it now. A missing key, one that is not an int, or a settings
+     *  provider that answers with an error all read as the default 0, Auto-lock — the
+     *  framework's own defaults; only a provider that cannot be acquired at all throws, and
+     *  `TaskActions` answers that as a line. */
     fun read(resolver: ContentResolver): ScreenTarget? =
         of(Settings.System.getInt(resolver, KEY, 0))
 }

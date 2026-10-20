@@ -114,12 +114,13 @@ fun ScreenTarget.label(): String = when (this) {
     ScreenTarget.BOTH -> "both screens"
 }
 
-/** The same, as the editor's nested choice names it — sentence case, FOCUSED explained once,
- *  where it is chosen. */
+/** The same, as the editor's nested choice names it — sentence case. No explainer on the
+ *  focused one: a Thor owner knows the focused screen, and the README names Focus Mode
+ *  (the owner's call at the device, 2026-10-20). */
 fun ScreenTarget.choiceLabel(): String = when (this) {
     ScreenTarget.TOP -> "Top screen"
     ScreenTarget.BOTTOM -> "Bottom screen"
-    ScreenTarget.FOCUSED -> FOCUSED_EXPLAINED
+    ScreenTarget.FOCUSED -> "Focused screen"
     ScreenTarget.BOTH -> "Both screens"
 }
 
@@ -150,9 +151,6 @@ fun Scope.line(labels: Map<String, String> = emptyMap()): String? {
         is Scope.Apps -> "Applies only in: ${names(included)}"
     }
 }
-
-const val FOCUSED_EXPLAINED =
-    "Focused screen — the one Focus Mode locks to, or the last touched on Auto-lock"
 
 /** The editor's copy, pinned by the spec. */
 object Copy {

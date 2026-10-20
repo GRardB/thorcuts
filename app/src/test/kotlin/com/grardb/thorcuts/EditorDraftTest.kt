@@ -81,13 +81,10 @@ class EditorDraftTest {
     }
 
     @Test
-    fun `the screen choices read in sentence case, the focused one explained`() {
+    fun `the screen choices read in sentence case, the focused one unexplained`() {
         assertEquals("Top screen", ScreenTarget.TOP.choiceLabel())
         assertEquals("Bottom screen", ScreenTarget.BOTTOM.choiceLabel())
-        assertEquals(
-            "Focused screen — the one Focus Mode locks to, or the last touched on Auto-lock",
-            ScreenTarget.FOCUSED.choiceLabel(),
-        )
+        assertEquals("Focused screen", ScreenTarget.FOCUSED.choiceLabel())
         assertEquals("the focused screen", ScreenTarget.FOCUSED.label())   // mid-sentence
     }
 
