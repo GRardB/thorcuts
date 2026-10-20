@@ -5,6 +5,7 @@ Button shortcuts for the AYN Thor. Bind a combo to:
 1. Swap the two screens
 1. Move the app in front to the other screen
 1. Close the app on a screen
+1. Close all apps on a screen
 1. Go home on a screen
 1. Open an app on a screen
 1. Take a screenshot of a screen
@@ -45,8 +46,8 @@ notifications; [The notification](#the-notification) says why.
 4. Choose **Tap** or **Timer**. Tap fires the moment the combo is complete. Timer fires once the
    combo has been held for the milliseconds you set (400 by default).
 5. Choose the action and, where it applies, the screen: the top screen, the bottom screen,
-   whichever screen has focus, or — for brightness — both. A brightness action also takes a
-   percent.
+   whichever screen has focus, or — for brightness and for closing all apps — both. A
+   brightness action also takes a percent.
 6. Choose where it applies: **Everywhere**, **Everywhere except…** some apps, or **Only in…**
    some apps. The last two need the accessibility service; see
    [Per-app shortcuts](#per-app-shortcuts).
@@ -121,6 +122,7 @@ storage, and nothing leaves the device unless you export it.
 - "Swap the screens" is a one-way move when one screen shows only the launcher: the app crosses
   over, and the launcher fills the screen it left. Closing an app shows the launcher; a screen
   is never left blank.
+- Closing all apps on a screen leaves a picture-in-picture window where it is.
 
 ## Building from source
 
