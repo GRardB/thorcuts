@@ -150,6 +150,9 @@ class TaskActions(
                 else -> "ERR unexpected focused display $d"
             }
         }
+        // The model refuses BOTH on this action (brightness spec §2); the branch is the
+        // compiler's, not a path.
+        ScreenTarget.BOTH -> error("TakeScreenshot cannot aim at both screens")
     }
 
     /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
@@ -212,6 +215,8 @@ class TaskActions(
         ScreenTarget.TOP -> TOP
         ScreenTarget.BOTTOM -> BOTTOM
         ScreenTarget.FOCUSED -> FOCUSED
+        // Every action that reaches here refuses BOTH in the model (brightness spec §2).
+        ScreenTarget.BOTH -> error("no single display for both screens")
     }
 
     private companion object {

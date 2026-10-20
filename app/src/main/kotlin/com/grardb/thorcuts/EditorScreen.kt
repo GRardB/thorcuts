@@ -46,7 +46,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
-import com.grardb.thorcuts.core.model.ScreenTarget
 
 /** The indent of a choice nested under its parent — a radio's width, so it reads as a child. */
 private val NESTED = 32.dp
@@ -162,7 +161,7 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             }
             if (draft.action.takesScreen) {
                 ChoiceGroup {
-                    for (target in ScreenTarget.entries) {
+                    for (target in draft.action.screens) {
                         ChoiceRow(target.choiceLabel(), selected = draft.screen == target) {
                             vm.setScreen(target)
                         }

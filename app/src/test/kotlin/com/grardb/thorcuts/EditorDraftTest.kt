@@ -180,6 +180,19 @@ class EditorDraftTest {
     }
 
     @Test
+    fun `both screens is named in the list and the editor, and no action offers it yet`() {
+        assertEquals("both screens", ScreenTarget.BOTH.label())
+        assertEquals("Both screens", ScreenTarget.BOTH.choiceLabel())
+        for (kind in ActionKind.entries) {
+            assertFalse(ScreenTarget.BOTH in kind.screens, kind.name)
+            assertEquals(
+                listOf(ScreenTarget.TOP, ScreenTarget.BOTTOM, ScreenTarget.FOCUSED),
+                kind.screens,
+            )
+        }
+    }
+
+    @Test
     fun `trigger text describes a recorded combo, or says there is none`() {
         assertEquals("AYN + X", base().triggerText)
         assertEquals(

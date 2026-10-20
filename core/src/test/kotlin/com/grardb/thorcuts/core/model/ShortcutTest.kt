@@ -79,6 +79,23 @@ class ShortcutTest {
     }
 
     @Test
+    fun `the four screen actions refuse both screens`() {
+        val cases = mapOf<String, () -> Action>(
+            "CloseScreen" to { Action.CloseScreen(ScreenTarget.BOTH) },
+            "GoHome" to { Action.GoHome(ScreenTarget.BOTH) },
+            "TakeScreenshot" to { Action.TakeScreenshot(ScreenTarget.BOTH) },
+            "OpenApp" to { Action.OpenApp("org.x.y", ScreenTarget.BOTH) },
+        )
+        for ((kind, build) in cases) {
+            val e = assertFailsWith<IllegalArgumentException> { build() }
+            assertEquals("$kind cannot aim at both screens", e.message)
+        }
+        // One screen, or the focused one, still binds.
+        assertEquals(ScreenTarget.TOP, Action.GoHome(ScreenTarget.TOP).screen)
+        assertEquals(ScreenTarget.FOCUSED, Action.CloseScreen(ScreenTarget.FOCUSED).screen)
+    }
+
+    @Test
     fun `a shortcut needs an id`() {
         val t = Trigger(setOf(ModifierKey.AYN), setOf(key(304)))
         assertFailsWith<IllegalArgumentException> { Shortcut("", t, Action.SwapScreens) }
@@ -157,7 +174,7 @@ class ShortcutTest {
         val close = Action.CloseScreen(ScreenTarget.FOCUSED)
         assertEquals(ScreenTarget.FOCUSED, close.screen)
         assertEquals(
-            setOf(ScreenTarget.TOP, ScreenTarget.BOTTOM, ScreenTarget.FOCUSED),
+            setOf(ScreenTarget.TOP, ScreenTarget.BOTTOM, ScreenTarget.FOCUSED, ScreenTarget.BOTH),
             ScreenTarget.entries.toSet(),
         )
     }

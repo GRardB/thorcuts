@@ -46,8 +46,19 @@ data class Trigger(
 /**
  * Which screen an action aims at. FOCUSED is resolved when the action RUNS, from the
  * window state at that moment: a fired rule arrives with no screen context of its own.
+ * BOTH is both screens, each on its own; only an action that says so takes it — the four
+ * screen actions below refuse it in their `init`, so a hand-written file cannot aim them at
+ * both (brightness spec, 2026-10-20).
  */
-enum class ScreenTarget { TOP, BOTTOM, FOCUSED }
+enum class ScreenTarget { TOP, BOTTOM, FOCUSED, BOTH }
+
+/** How a brightness action treats its percent: a step up, a step down, or the level itself. */
+enum class BrightnessMode { INCREASE, DECREASE, SET }
+
+/** The rule the four screen actions share: one screen, or the focused one — never BOTH. The
+ *  message is a drop reason only; the editor never offers the radio to them. */
+private fun requireOne(kind: String, screen: ScreenTarget) =
+    require(screen != ScreenTarget.BOTH) { "$kind cannot aim at both screens" }
 
 /**
  * Parent spec §9's actions, plus M7's screenshot, as data only. Nothing in :core dispatches
@@ -58,13 +69,19 @@ enum class ScreenTarget { TOP, BOTTOM, FOCUSED }
 sealed interface Action {
     data object SwapScreens : Action
     data object MoveFocusedToOtherScreen : Action
-    data class CloseScreen(val screen: ScreenTarget) : Action
-    data class GoHome(val screen: ScreenTarget) : Action
+    data class CloseScreen(val screen: ScreenTarget) : Action {
+        init { requireOne("CloseScreen", screen) }
+    }
+    data class GoHome(val screen: ScreenTarget) : Action {
+        init { requireOne("GoHome", screen) }
+    }
 
     /** Take a screenshot of [screen]: Android's own for the top screen, a root capture filed
      *  into the gallery for the bottom (M7, 2026-10-19). Nothing to validate: no value of
      *  this reaches a shell. */
-    data class TakeScreenshot(val screen: ScreenTarget) : Action
+    data class TakeScreenshot(val screen: ScreenTarget) : Action {
+        init { requireOne("TakeScreenshot", screen) }
+    }
 
     /** Open [packageName]'s launch activity on [screen]. The name is validated here because
      *  it reaches a root shell (`am start`); the codec's drop reason is this message. */
@@ -73,6 +90,7 @@ sealed interface Action {
             require(CommandSafety.isPackage(packageName)) {
                 "The app must be named by its package name (got '$packageName')"
             }
+            requireOne("OpenApp", screen)
         }
     }
 }

@@ -2,6 +2,7 @@ package com.grardb.thorcuts.platform.tasks
 
 import android.app.ActivityManager
 import android.os.IBinder
+import com.grardb.thorcuts.core.model.BrightnessMode
 
 /**
  * Runs in a bare `app_process` VM as uid 0.
@@ -22,6 +23,7 @@ import android.os.IBinder
  *   … TaskTool focused
  *   … TaskTool close <display|focused> [launcherPkg...]
  *   … TaskTool move <display|focused> <displayA> <displayB>
+ *   … TaskTool brightness <display> <INCREASE|DECREASE|SET> <percent>
  *
  * A <display> is an int; `focused` names the display of the window manager's focused
  * root task, resolved here and nowhere else (see [resolveDisplay]). The packages after
@@ -43,7 +45,10 @@ object TaskTool {
     private const val SWAP_USAGE = "usage: $SWAP_ARGS"
     private const val CLOSE_USAGE = "usage: $CLOSE_ARGS"
     private const val MOVE_USAGE = "usage: $MOVE_ARGS"
-    private const val USAGE = "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $MOVE_ARGS"
+    private const val BRIGHTNESS_ARGS = "brightness <display> <INCREASE|DECREASE|SET> <percent>"
+    private const val BRIGHTNESS_USAGE = "usage: $BRIGHTNESS_ARGS"
+    private const val USAGE =
+        "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $MOVE_ARGS | $BRIGHTNESS_ARGS"
 
     /**
      * `WindowConfiguration.ACTIVITY_TYPE_HOME` — @hide, so written out.
@@ -97,6 +102,11 @@ object TaskTool {
                     arg(args, 1, MOVE_USAGE),
                     intArg(args, 2, MOVE_USAGE),
                     intArg(args, 3, MOVE_USAGE),
+                )
+                "brightness" -> brightness(
+                    intArg(args, 1, BRIGHTNESS_USAGE),
+                    arg(args, 2, BRIGHTNESS_USAGE),
+                    intArg(args, 3, BRIGHTNESS_USAGE),
                 )
                 else -> fail(2, USAGE)
             }
@@ -373,6 +383,41 @@ object TaskTool {
         val onto =
             if (covered != null) " over ${covered.taskId}@$to" else "; display $to had no app"
         ok("moved ${task.taskId}@$from -> $to$onto")
+    }
+
+    /**
+     * Step or set one display's brightness (brightness spec §5), the way its slider does:
+     * `IDisplayManager.getBrightness(displayId)` for the user-set level — a float, 0..1, and
+     * both of the Thor's sliders are linear in it (the recon, 2026-10-20) — then
+     * `setBrightness(displayId, float)` with [targetPercent]'s level. Hidden API, so by
+     * reflection; the permission (`CONTROL_DISPLAY_BRIGHTNESS`) is uid 0's. The line is the
+     * display's part of the app's outcome, verbatim: `OK display 4: 35% -> 45%`.
+     */
+    private fun brightness(display: Int, modeArg: String, percent: Int) {
+        val mode = BrightnessMode.entries.firstOrNull { it.name == modeArg }
+            ?: fail(2, BRIGHTNESS_USAGE)
+        val dm = displayManager() ?: fail(3, "display service unavailable")
+        val current = dm.javaClass.getMethod("getBrightness", Int::class.javaPrimitiveType)
+            .invoke(dm, display) as Float
+        // The service answers a display it does not know with its "invalid" float (NaN) and
+        // ignores a write to it, so without this a wrong id would read as `0% -> 50%`, done.
+        if (current.isNaN()) fail(1, "display $display has no brightness")
+        val from = Math.round(current * 100)
+        val to = targetPercent(mode, from, percent)
+        dm.javaClass.getMethod(
+            "setBrightness", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType,
+        ).invoke(dm, display, to / 100f)
+        ok("display $display: $from% -> $to%")
+    }
+
+    /** The display service, reached as [activityTaskManager] reaches its own. */
+    private fun displayManager(): Any? {
+        val binder = Class.forName("android.os.ServiceManager")
+            .getMethod("getService", String::class.java)
+            .invoke(null, "display") as? IBinder ?: return null
+        return Class.forName("android.hardware.display.IDisplayManager\$Stub")
+            .getMethod("asInterface", IBinder::class.java)
+            .invoke(null, binder)
     }
 
     private fun activityTaskManager(): Any? {

@@ -32,6 +32,10 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
      *  completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
 
+    /** The screen radios this kind offers, in the editor's order. BOTH is for an action that
+     *  takes it (the model refuses it on the rest); none does yet. */
+    val screens: List<ScreenTarget> get() = ScreenTarget.entries - ScreenTarget.BOTH
+
     /** The action, from the nested choices: [screen] for the four that aim at one, [app]
      *  (a package) for [OPEN] — refused with `Choose an app` when there is none. */
     fun action(screen: ScreenTarget, app: String?): Action = when (this) {
@@ -74,6 +78,7 @@ fun ScreenTarget.label(): String = when (this) {
     ScreenTarget.TOP -> "the top screen"
     ScreenTarget.BOTTOM -> "the bottom screen"
     ScreenTarget.FOCUSED -> "the focused screen"
+    ScreenTarget.BOTH -> "both screens"
 }
 
 /** The same, as the editor's nested choice names it — sentence case, FOCUSED explained once,
@@ -82,6 +87,7 @@ fun ScreenTarget.choiceLabel(): String = when (this) {
     ScreenTarget.TOP -> "Top screen"
     ScreenTarget.BOTTOM -> "Bottom screen"
     ScreenTarget.FOCUSED -> FOCUSED_EXPLAINED
+    ScreenTarget.BOTH -> "Both screens"
 }
 
 /** An action as the list names it: "Close the app on the focused screen", "Open Dolphin on
