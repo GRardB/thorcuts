@@ -330,6 +330,7 @@ class TaskActionsTest {
         val cases = mapOf(
             ScreenTarget.TOP to ("0" to "OK display 0: 35% -> 45%"),
             ScreenTarget.BOTTOM to ("4" to "OK display 4: 60% -> 50%"),
+            ScreenTarget.FOCUSED to ("focused" to "OK display 4: 20% -> 30%"),
             ScreenTarget.BOTH to ("both" to "OK display 0: 35% -> 45%, display 4: 20% -> 30%"),
         )
         for ((screen, case) in cases) {
@@ -348,6 +349,12 @@ class TaskActionsTest {
             "ERR display 0: 35% -> 45%, display 4: unknown to the display service",
             actions(err).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTH),
         )
+        val unfocused = FakeGateway("ERR no focused root task")
+        assertEquals(
+            "ERR no focused root task",
+            actions(unfocused).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.FOCUSED),
+        )
+        assertEquals(listOf(brightness("focused", BrightnessMode.SET, 50)), unfocused.calls)
         val none = FakeGateway(null)
         assertEquals(
             "ERR no reply from pservice",
@@ -358,33 +365,6 @@ class TaskActionsTest {
             "ERR the tool printed no result line",
             actions(blank).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTTOM),
         )
-    }
-
-    @Test
-    fun `changeBrightness FOCUSED asks the tool which display first`() {
-        val g = FakeGateway("OK focused display=4 task=7 pkg=org.x", "OK display 4: 20% -> 10%")
-        assertEquals(
-            "OK display 4: 20% -> 10%",
-            actions(g).changeBrightness(BrightnessMode.DECREASE, 10, ScreenTarget.FOCUSED),
-        )
-        assertEquals(
-            listOf(entryPoint("focused"), brightness("4", BrightnessMode.DECREASE, 10)),
-            g.calls,
-        )
-
-        val err = FakeGateway("ERR no focused task")
-        assertEquals(
-            "ERR no focused task",
-            actions(err).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.FOCUSED),
-        )
-        assertEquals(listOf(entryPoint("focused")), err.calls)
-
-        val elsewhere = FakeGateway("OK focused display=2 task=7 pkg=org.x")
-        assertEquals(
-            "ERR unexpected focused display 2",
-            actions(elsewhere).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.FOCUSED),
-        )
-        assertEquals(listOf(entryPoint("focused")), elsewhere.calls)
     }
 
     @Test

@@ -6,7 +6,7 @@ import com.grardb.thorcuts.core.safety.CommandSafety
 import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
 
 /**
- * The app-side face of [TaskTool], and of the two actions a shell line performs.
+ * The app-side face of [TaskTool], and of the actions a shell line performs.
  * Blocking — call on [com.grardb.thorcuts.platform.privilege.Privilege.dispatcher].
  *
  * Every method returns ONE line, `OK …` or `ERR …`, verbatim from whatever did the work
@@ -158,28 +158,16 @@ class TaskActions(
 
     /**
      * Step or set [screen]'s brightness (brightness spec §4-5): the tool's `brightness
-     * <display|both> <mode> <percent>`, ONE round trip whichever screen. The tool reads the
-     * level from the display service, applies the step or the level, clamps, writes it back —
-     * and for `both` does the two displays back to back inside its one process, so they change
-     * together (two round trips lit the top a JVM spawn before the bottom, 2026-10-20). FOCUSED
-     * asks the tool which display holds focus first, as [openApp] does. The tool's line is
+     * <display|focused|both> <mode> <percent>`, ONE round trip whichever screen. The tool
+     * resolves `focused` itself, as it does for close and move; reads the level from the
+     * display service, applies the step or the level, clamps, writes it back — and for `both`
+     * does the two displays back to back inside its one process, so they change together (two
+     * round trips lit the top a JVM spawn before the bottom, 2026-10-20). The tool's line is
      * returned verbatim: one part per display, `display <id>: <from>% -> <to>%` or `display
      * <id>: <reason>`, `OK` when every part succeeded and `ERR` otherwise.
      */
-    fun changeBrightness(mode: BrightnessMode, percent: Int, screen: ScreenTarget): String {
-        val display = when (screen) {
-            ScreenTarget.TOP -> TOP
-            ScreenTarget.BOTTOM -> BOTTOM
-            ScreenTarget.BOTH -> BOTH_DISPLAYS
-            ScreenTarget.FOCUSED -> {
-                val d = focusedDisplay()
-                if (d.startsWith("ERR ")) return d
-                if (d != TOP && d != BOTTOM) return "ERR unexpected focused display $d"
-                d
-            }
-        }
-        return tool("brightness", display, mode.name, percent.toString())
-    }
+    fun changeBrightness(mode: BrightnessMode, percent: Int, screen: ScreenTarget): String =
+        tool("brightness", screenArg(screen), mode.name, percent.toString())
 
     /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
     private fun screenshotKey(): String {
@@ -241,8 +229,8 @@ class TaskActions(
         ScreenTarget.TOP -> TOP
         ScreenTarget.BOTTOM -> BOTTOM
         ScreenTarget.FOCUSED -> FOCUSED
-        // Every action that reaches here refuses BOTH in the model (brightness spec §2).
-        ScreenTarget.BOTH -> error("no single display for both screens")
+        // Only brightness sends this word; the model refuses BOTH on every other action.
+        ScreenTarget.BOTH -> BOTH_DISPLAYS
     }
 
     private companion object {

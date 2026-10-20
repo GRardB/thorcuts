@@ -23,7 +23,7 @@ import com.grardb.thorcuts.core.model.BrightnessMode
  *   … TaskTool focused
  *   … TaskTool close <display|focused> [launcherPkg...]
  *   … TaskTool move <display|focused> <displayA> <displayB>
- *   … TaskTool brightness <display|both> <INCREASE|DECREASE|SET> <percent>
+ *   … TaskTool brightness <display|focused|both> <INCREASE|DECREASE|SET> <percent>
  *
  * A <display> is an int; `focused` names the display of the window manager's focused
  * root task, resolved here and nowhere else (see [resolveDisplay]). The packages after
@@ -46,7 +46,7 @@ object TaskTool {
     private const val CLOSE_USAGE = "usage: $CLOSE_ARGS"
     private const val MOVE_USAGE = "usage: $MOVE_ARGS"
     private const val BRIGHTNESS_ARGS =
-        "brightness <display|both> <INCREASE|DECREASE|SET> <percent>"
+        "brightness <display|focused|both> <INCREASE|DECREASE|SET> <percent>"
     private const val BRIGHTNESS_USAGE = "usage: $BRIGHTNESS_ARGS"
 
     /** The brightness display argument that means the top then the bottom, in this process. */
@@ -108,6 +108,7 @@ object TaskTool {
                     intArg(args, 3, MOVE_USAGE),
                 )
                 "brightness" -> brightness(
+                    atm,
                     arg(args, 1, BRIGHTNESS_USAGE),
                     arg(args, 2, BRIGHTNESS_USAGE),
                     intArg(args, 3, BRIGHTNESS_USAGE),
@@ -393,16 +394,18 @@ object TaskTool {
      * Step or set one display's brightness, or both displays' in this one process (brightness
      * spec §5), the way each slider does. `both` sets [ThorDisplays.TOP] then
      * [ThorDisplays.BOTTOM] back to back — the Thor's own quick menu sets them from one process,
-     * and two tool runs lit the top a JVM spawn before the bottom (2026-10-20). One part per
-     * display ([brightnessPart]); the second display is still tried after the first fails, so
-     * a one-sided result reads differently from a failure before anything happened. The line
-     * is the parts in display order: `OK` when all succeeded, `ERR` (exit 1) otherwise.
+     * and two tool runs lit the top a JVM spawn before the bottom (2026-10-20). `focused` is
+     * the focused root task's display through [resolveDisplay], as `close` and `move` take
+     * it — resolved here so a focused-screen press is one round trip like any other. One part
+     * per display ([brightnessPart]); the second display is still tried after the first fails,
+     * so a one-sided result reads differently from a failure before anything happened. The
+     * line is the parts in display order: `OK` when all succeeded, `ERR` (exit 1) otherwise.
      */
-    private fun brightness(displayArg: String, modeArg: String, percent: Int) {
+    private fun brightness(atm: Any, displayArg: String, modeArg: String, percent: Int) {
         val mode = BrightnessMode.entries.firstOrNull { it.name == modeArg }
             ?: fail(2, BRIGHTNESS_USAGE)
         val displays = if (displayArg == BOTH) listOf(ThorDisplays.TOP, ThorDisplays.BOTTOM)
-        else listOf(displayArg.toIntOrNull() ?: fail(2, BRIGHTNESS_USAGE))
+        else listOf(resolveDisplay(atm, displayArg))
         val dm = displayManager() ?: fail(3, "display service unavailable")
         val parts = displays.map { display -> brightnessPart(dm, display, mode, percent) }
         val line = parts.joinToString(", ") { it.second }
