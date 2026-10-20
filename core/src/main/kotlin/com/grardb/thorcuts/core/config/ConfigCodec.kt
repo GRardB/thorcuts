@@ -1,6 +1,7 @@
 package com.grardb.thorcuts.core.config
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
@@ -195,23 +196,48 @@ object ConfigCodec {
         value = o.int("value"),
     )
 
+    /**
+     * The action members the reader knows, by the kinds that take them. A known member on a
+     * kind that does not take it is refused (`GoHome takes no package`): that is a mangled
+     * entry, not an unknown extra — an unknown extra inside `action` is not preserved on
+     * write, so refusing it would cost nothing anyone wrote on purpose.
+     */
+    private val ACTION_MEMBERS: Map<String, Set<String>> = mapOf(
+        "SwapScreens" to emptySet(),
+        "MoveFocusedToOtherScreen" to emptySet(),
+        "CloseScreen" to setOf("screen"),
+        "GoHome" to setOf("screen"),
+        "TakeScreenshot" to setOf("screen"),
+        "OpenApp" to setOf("package", "screen"),
+        "Brightness" to setOf("mode", "percent", "screen"),
+    )
+
+    /** The known members, in the order their refusals are reported. */
+    private val ACTION_MEMBER_NAMES = listOf("screen", "package", "mode", "percent")
+
     private fun readAction(o: JsonObject): Action {
         val kind = o.string("kind")
-        val screen = o["screen"]?.asEnum<ScreenTarget>("screen")
-        val pkg = o["package"]?.asString("package")
-        fun needsScreen(): ScreenTarget = screen ?: fail("$kind needs a screen")
-        fun noScreen() { if (screen != null) fail("$kind takes no screen") }
-        fun noPackage() { if (pkg != null) fail("$kind takes no package") }
+        val takes = ACTION_MEMBERS[kind] ?: fail("unknown action kind '$kind'")
+        for (member in ACTION_MEMBER_NAMES) {
+            if (member in o && member !in takes) fail("$kind takes no $member")
+        }
+        // A member this kind takes: present and well-formed, or the kind's own "needs" line.
+        fun <T : Any> need(member: String, read: (JsonElement) -> T): T =
+            o[member]?.let(read) ?: fail("$kind needs a $member")
+        fun screen(): ScreenTarget = need("screen") { it.asEnum<ScreenTarget>("screen") }
         return when (kind) {
-            "SwapScreens" -> { noScreen(); noPackage(); Action.SwapScreens }
-            "MoveFocusedToOtherScreen" -> {
-                noScreen(); noPackage(); Action.MoveFocusedToOtherScreen
-            }
-            "CloseScreen" -> { noPackage(); Action.CloseScreen(needsScreen()) }
-            "GoHome" -> { noPackage(); Action.GoHome(needsScreen()) }
-            "TakeScreenshot" -> { noPackage(); Action.TakeScreenshot(needsScreen()) }
-            "OpenApp" -> Action.OpenApp(pkg ?: fail("$kind needs a package"), needsScreen())
-            else -> fail("unknown action kind '$kind'")
+            "SwapScreens" -> Action.SwapScreens
+            "MoveFocusedToOtherScreen" -> Action.MoveFocusedToOtherScreen
+            "CloseScreen" -> Action.CloseScreen(screen())
+            "GoHome" -> Action.GoHome(screen())
+            "TakeScreenshot" -> Action.TakeScreenshot(screen())
+            "OpenApp" -> Action.OpenApp(need("package") { it.asString("package") }, screen())
+            "Brightness" -> Action.Brightness(
+                need("mode") { it.asEnum<BrightnessMode>("mode") },
+                need("percent") { it.asInt("percent") },
+                screen(),
+            )
+            else -> fail("unknown action kind '$kind'")   // unreachable: the table decided
         }
     }
 
@@ -271,6 +297,12 @@ object ConfigCodec {
                     is Action.CloseScreen -> screenAction("CloseScreen", a.screen)
                     is Action.GoHome -> screenAction("GoHome", a.screen)
                     is Action.TakeScreenshot -> screenAction("TakeScreenshot", a.screen)
+                    is Action.Brightness -> {
+                        put("kind", "Brightness")
+                        put("mode", a.mode.name)
+                        put("percent", a.percent)
+                        put("screen", a.screen.name)
+                    }
                     is Action.OpenApp -> {
                         put("kind", "OpenApp")
                         put("package", a.packageName)

@@ -3,6 +3,7 @@ package com.grardb.thorcuts
 import android.net.Uri
 import com.grardb.thorcuts.core.config.InMemoryConfigFile
 import com.grardb.thorcuts.core.config.ONE_SHORTCUT_TEXT
+import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.platform.coordinator.FakeSwitch
 import com.grardb.thorcuts.platform.coordinator.ThorcutsCoordinator
 import com.grardb.thorcuts.platform.helper.FakeChannel
@@ -100,5 +101,17 @@ class ThorcutsViewModelTest {
         assertEquals("Import failed: could not read: boom", s.message?.text)
         assertNull(s.report)
         assertEquals(1, file.writes.size)                       // the default at load; no more
+    }
+
+    @Test
+    fun `setAction routes through withAction, so a both-screens choice moves back too`() {
+        val vm = viewModel()
+        vm.add()
+        vm.setAction(ActionKind.BRIGHTER)
+        vm.setScreen(ScreenTarget.BOTH)
+        vm.setAction(ActionKind.CLOSE)
+        val editor = requireNotNull(vm.state.value.editor)
+        assertEquals(ScreenTarget.FOCUSED, editor.screen)
+        assertEquals(ActionKind.CLOSE, editor.action)
     }
 }

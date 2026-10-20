@@ -61,8 +61,9 @@ private fun requireOne(kind: String, screen: ScreenTarget) =
     require(screen != ScreenTarget.BOTH) { "$kind cannot aim at both screens" }
 
 /**
- * Parent spec §9's actions, plus M7's screenshot, as data only. Nothing in :core dispatches
- * them; the app resolves a fired rule back to its Shortcut and acts from there. [OpenApp]
+ * Parent spec §9's actions, plus M7's screenshot and the brightness action, as data only. Nothing
+ * in :core dispatches them; the app resolves a fired rule back to its Shortcut and acts from
+ * there. [OpenApp]
  * generalises what was `OpenThorcuts(screen)` (the follow-ups spec, 2026-10-18): any installed app,
  * by package, on a screen.
  */
@@ -91,6 +92,27 @@ sealed interface Action {
                 "The app must be named by its package name (got '$packageName')"
             }
             requireOne("OpenApp", screen)
+        }
+    }
+
+    /**
+     * Step [screen]'s brightness by [percent] of its slider ([mode] INCREASE or DECREASE), or
+     * set it there (SET) — the brightness spec, 2026-10-20. The only action that takes
+     * [ScreenTarget.BOTH]. The ranges are the slider's; the values reach the root tool as an
+     * integer and an enum name, never as free text.
+     */
+    data class Brightness(
+        val mode: BrightnessMode, val percent: Int, val screen: ScreenTarget,
+    ) : Action {
+        init {
+            when (mode) {
+                BrightnessMode.SET -> require(percent in 0..100) {
+                    "The brightness must be between 0 and 100 (got $percent)"
+                }
+                else -> require(percent in 1..100) {
+                    "The step must be between 1 and 100 (got $percent)"
+                }
+            }
         }
     }
 }

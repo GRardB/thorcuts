@@ -1,6 +1,7 @@
 package com.grardb.thorcuts.core.config
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
 import com.grardb.thorcuts.core.model.ScreenTarget
@@ -364,8 +365,52 @@ class ConfigCodecTest {
                 """"kind":"SwapScreens"""",
                 """"kind":"TakeScreenshot","screen":"TOP","package":"a.b"""",
             ) to "TakeScreenshot takes no package",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"Brightness","percent":10,"screen":"TOP"""",
+            ) to "Brightness needs a mode",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"Brightness","mode":"SET","screen":"TOP"""",
+            ) to "Brightness needs a percent",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"Brightness","mode":"SET","percent":10""",
+            ) to "Brightness needs a screen",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"Brightness","mode":"DIM","percent":10,"screen":"TOP"""",
+            ) to "mode: unknown name 'DIM'",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"Brightness","mode":"SET","percent":"10","screen":"TOP"""",
+            ) to "percent is not an integer",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"Brightness","mode":"INCREASE","percent":150,"screen":"TOP"""",
+            ) to "The step must be between 1 and 100 (got 150)",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"Brightness","mode":"SET","percent":50,"screen":"TOP","package":"a.b"""",
+            ) to "Brightness takes no package",
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"GoHome","screen":"TOP","mode":"SET"""",
+            ) to "GoHome takes no mode",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"OpenApp","package":"a.b","screen":"TOP","percent":5""",
+            ) to "OpenApp takes no percent",
+            swap.replace(""""kind":"SwapScreens"""", """"kind":"GoHome","screen":"BOTH"""")
+                to "GoHome cannot aim at both screens",
         )
     )
+
+    @Test
+    fun `every known action member is refused on a kind that does not take it`() {
+        val cases = listOf("screen", "package", "mode", "percent").map { member ->
+            swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"SwapScreens","$member":"x"""",
+            ) to "SwapScreens takes no $member"
+        }
+        assertDrops(cases)
+    }
 
     @Test
     fun `an OpenApp round-trips with its package and screen`() {
@@ -381,6 +426,26 @@ class ConfigCodecTest {
         val written = ConfigCodec.encode(c)
         assertTrue("\"package\": \"org.dolphinemu.dolphinemu\"" in written, written)
         assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+    }
+
+    @Test
+    fun `a Brightness round-trips with its mode, percent and screen, on every mode and screen`() {
+        for (mode in BrightnessMode.entries) for (screen in ScreenTarget.entries) {
+            val entry = swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"Brightness","mode":"${mode.name}","percent":10,"screen":"${screen.name}"""",
+            )
+            val c = ok(file(entry)).config
+            assertEquals(Action.Brightness(mode, 10, screen), c.shortcuts.single().action)
+            val written = ConfigCodec.encode(c)
+            // Canonical member order: kind, mode, percent, screen.
+            val k = written.indexOf("\"kind\": \"Brightness\"")
+            val m = written.indexOf("\"mode\": \"${mode.name}\"")
+            val p = written.indexOf("\"percent\": 10")
+            val s = written.indexOf("\"screen\": \"${screen.name}\"")
+            assertTrue(k >= 0 && k < m && m < p && p < s, written)
+            assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+        }
     }
 
     @Test

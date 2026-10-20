@@ -1,6 +1,7 @@
 package com.grardb.thorcuts
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
@@ -168,7 +169,7 @@ class EditorDraftTest {
         assertNull(back.openApp)
         assertEquals("Take a screenshot of…", ActionKind.SHOT.choiceLabel)
         assertEquals("Take a screenshot of the bottom screen", s.action.label())
-        assertEquals(ActionKind.SHOT, ActionKind.entries.last())   // last in the editor
+        assertEquals(5, ActionKind.entries.indexOf(ActionKind.SHOT))   // sixth in the editor
     }
 
     @Test
@@ -180,16 +181,88 @@ class EditorDraftTest {
     }
 
     @Test
-    fun `both screens is named in the list and the editor, and no action offers it yet`() {
+    fun `both screens is named in the list and the editor, and only the brightness kinds offer it`() {
         assertEquals("both screens", ScreenTarget.BOTH.label())
         assertEquals("Both screens", ScreenTarget.BOTH.choiceLabel())
+        val bright = setOf(ActionKind.BRIGHTER, ActionKind.DIMMER, ActionKind.BRIGHTNESS)
         for (kind in ActionKind.entries) {
-            assertFalse(ScreenTarget.BOTH in kind.screens, kind.name)
+            assertEquals(kind in bright, kind.takesPercent, kind.name)
+            assertEquals(kind in bright, kind.allowsBoth, kind.name)
+            assertEquals(kind in bright, ScreenTarget.BOTH in kind.screens, kind.name)
             assertEquals(
                 listOf(ScreenTarget.TOP, ScreenTarget.BOTTOM, ScreenTarget.FOCUSED),
-                kind.screens,
+                kind.screens.take(3),
+                kind.name,
             )
         }
+        assertEquals(
+            listOf(ActionKind.BRIGHTER, ActionKind.DIMMER, ActionKind.BRIGHTNESS),
+            ActionKind.entries.takeLast(3),
+        )
+        assertEquals("Increase brightness by…", ActionKind.BRIGHTER.choiceLabel)
+        assertEquals("Decrease brightness by…", ActionKind.DIMMER.choiceLabel)
+        assertEquals("Set brightness to…", ActionKind.BRIGHTNESS.choiceLabel)
+    }
+
+    @Test
+    fun `a brightness action round-trips with its mode, percent and screen, and names no app`() {
+        val cases = mapOf(
+            ActionKind.BRIGHTER to BrightnessMode.INCREASE,
+            ActionKind.DIMMER to BrightnessMode.DECREASE,
+            ActionKind.BRIGHTNESS to BrightnessMode.SET,
+        )
+        for ((kind, mode) in cases) {
+            val s = base().copy(action = kind, screen = ScreenTarget.BOTH, percent = " 25 ")
+                .toShortcut()
+            assertEquals(Action.Brightness(mode, 25, ScreenTarget.BOTH), s.action)
+            val back = EditorDraft.of(s)
+            assertEquals(kind, back.action)
+            assertEquals(ScreenTarget.BOTH, back.screen)
+            assertEquals("25", back.percent)
+            assertNull(back.openApp)
+        }
+        assertEquals("10", EditorDraft.of(base().toShortcut()).percent)   // the swap keeps the default
+    }
+
+    @Test
+    fun `a percent that is not a whole number is refused, and the model's ranges come through`() {
+        val e = assertFailsWith<IllegalArgumentException> {
+            base().copy(action = ActionKind.BRIGHTNESS, percent = "half").toShortcut()
+        }
+        assertEquals("The percent must be a whole number", e.message)
+        val big = assertFailsWith<IllegalArgumentException> {
+            base().copy(action = ActionKind.BRIGHTER, percent = "150").toShortcut()
+        }
+        assertEquals("The step must be between 1 and 100 (got 150)", big.message)
+        // A kind that takes no percent ignores whatever the field holds.
+        assertEquals(Action.SwapScreens, base().copy(percent = "half").toShortcut().action)
+    }
+
+    @Test
+    fun `the list reads a brightness action with its percent and screen`() {
+        assertEquals(
+            "Increase brightness by 10% on both screens",
+            Action.Brightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH).label(),
+        )
+        assertEquals(
+            "Set brightness to 50% on the top screen",
+            Action.Brightness(BrightnessMode.SET, 50, ScreenTarget.TOP).label(),
+        )
+        assertEquals(
+            "Decrease brightness by 20% on the focused screen",
+            Action.Brightness(BrightnessMode.DECREASE, 20, ScreenTarget.FOCUSED).label(),
+        )
+    }
+
+    @Test
+    fun `choosing a kind that cannot aim at both screens moves the choice back to the focused one`() {
+        val both = base().copy(action = ActionKind.BRIGHTER, screen = ScreenTarget.BOTH)
+        assertEquals(ScreenTarget.BOTH, both.withAction(ActionKind.DIMMER).screen)
+        assertEquals(ScreenTarget.FOCUSED, both.withAction(ActionKind.CLOSE).screen)
+        assertEquals(ActionKind.CLOSE, both.withAction(ActionKind.CLOSE).action)
+        val top = base().copy(action = ActionKind.BRIGHTER, screen = ScreenTarget.TOP)
+        assertEquals(ScreenTarget.TOP, top.withAction(ActionKind.HOME).screen)
+        assertEquals("stale", base().copy(error = "stale").withAction(ActionKind.CLOSE).error)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.grardb.thorcuts.core.config
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.Device
 import com.grardb.thorcuts.core.model.EvdevType
@@ -165,6 +166,13 @@ val KITCHEN_SINK = ThorcutsConfig(
             id = "shot-bottom",
             trigger = Trigger(setOf(ModifierKey.BACK), setOf(padKey(308))),
             action = Action.TakeScreenshot(ScreenTarget.BOTTOM),
+        ),
+        Shortcut(
+            id = "brighter-both",
+            trigger = Trigger(
+                setOf(ModifierKey.AYN), setOf(Control(Device.PAD, EvdevType.ABS, 17, -1)),
+            ),
+            action = Action.Brightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH),
         ),
     ),
     unknown = UnknownFields(

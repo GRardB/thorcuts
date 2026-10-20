@@ -326,33 +326,37 @@ class TaskActionsTest {
         entryPoint("brightness", display, mode.name, percent.toString())
 
     @Test
-    fun `changeBrightness TOP and BOTTOM run the tool on their display and return its line`() {
-        val top = FakeGateway("OK display 0: 35% -> 45%")
-        assertEquals(
-            "OK display 0: 35% -> 45%",
-            actions(top).changeBrightness(BrightnessMode.INCREASE, 10, ScreenTarget.TOP),
+    fun `changeBrightness runs the tool once with the screen's display word, line verbatim`() {
+        val cases = mapOf(
+            ScreenTarget.TOP to ("0" to "OK display 0: 35% -> 45%"),
+            ScreenTarget.BOTTOM to ("4" to "OK display 4: 60% -> 50%"),
+            ScreenTarget.BOTH to ("both" to "OK display 0: 35% -> 45%, display 4: 20% -> 30%"),
         )
-        assertEquals(listOf(brightness("0", BrightnessMode.INCREASE, 10)), top.calls)
-
-        val bottom = FakeGateway("OK display 4: 60% -> 50%")
-        assertEquals(
-            "OK display 4: 60% -> 50%",
-            actions(bottom).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTTOM),
-        )
-        assertEquals(listOf(brightness("4", BrightnessMode.SET, 50)), bottom.calls)
+        for ((screen, case) in cases) {
+            val (word, line) = case
+            val g = FakeGateway(line)
+            assertEquals(line, actions(g).changeBrightness(BrightnessMode.INCREASE, 10, screen))
+            assertEquals(listOf(brightness(word, BrightnessMode.INCREASE, 10)), g.calls)
+        }
     }
 
     @Test
-    fun `changeBrightness on one screen passes the tool's ERR through as that display's part`() {
-        val g = FakeGateway("ERR display service unavailable")
+    fun `changeBrightness passes the tool's ERR line through, and names a silent pservice`() {
+        val err =
+            FakeGateway("ERR display 0: 35% -> 45%, display 4: unknown to the display service")
         assertEquals(
-            "ERR display 0: display service unavailable",
-            actions(g).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.TOP),
+            "ERR display 0: 35% -> 45%, display 4: unknown to the display service",
+            actions(err).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTH),
         )
         val none = FakeGateway(null)
         assertEquals(
-            "ERR display 4: no reply from pservice",
-            actions(none).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTTOM),
+            "ERR no reply from pservice",
+            actions(none).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.TOP),
+        )
+        val blank = FakeGateway("")
+        assertEquals(
+            "ERR the tool printed no result line",
+            actions(blank).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.BOTTOM),
         )
     }
 
@@ -381,44 +385,6 @@ class TaskActionsTest {
             actions(elsewhere).changeBrightness(BrightnessMode.SET, 50, ScreenTarget.FOCUSED),
         )
         assertEquals(listOf(entryPoint("focused")), elsewhere.calls)
-    }
-
-    @Test
-    fun `changeBrightness BOTH runs the top then the bottom and folds the two parts`() {
-        val g = FakeGateway("OK display 0: 35% -> 45%", "OK display 4: 20% -> 30%")
-        assertEquals(
-            "OK display 0: 35% -> 45%, display 4: 20% -> 30%",
-            actions(g).changeBrightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH),
-        )
-        assertEquals(
-            listOf(
-                brightness("0", BrightnessMode.INCREASE, 10),
-                brightness("4", BrightnessMode.INCREASE, 10),
-            ),
-            g.calls,
-        )
-    }
-
-    @Test
-    fun `changeBrightness BOTH still tries the second display after the first fails`() {
-        val noReply = FakeGateway(null, "OK display 4: 20% -> 30%")
-        assertEquals(
-            "ERR display 0: no reply from pservice, display 4: 20% -> 30%",
-            actions(noReply).changeBrightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH),
-        )
-        assertEquals(2, noReply.calls.size)
-
-        val toolErr = FakeGateway("OK display 0: 35% -> 45%", "ERR display service unavailable")
-        assertEquals(
-            "ERR display 0: 35% -> 45%, display 4: display service unavailable",
-            actions(toolErr).changeBrightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH),
-        )
-
-        val blank = FakeGateway("", "OK display 4: 20% -> 30%")
-        assertEquals(
-            "ERR display 0: the tool printed no result line, display 4: 20% -> 30%",
-            actions(blank).changeBrightness(BrightnessMode.SET, 30, ScreenTarget.BOTH),
-        )
     }
 
     @Test

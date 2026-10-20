@@ -96,6 +96,28 @@ class ShortcutTest {
     }
 
     @Test
+    fun `a brightness set is 0 to 100 and a step 1 to 100, on any screen including both`() {
+        assertEquals(ScreenTarget.BOTH, Action.Brightness(BrightnessMode.SET, 0, ScreenTarget.BOTH).screen)
+        assertEquals(100, Action.Brightness(BrightnessMode.INCREASE, 100, ScreenTarget.TOP).percent)
+        assertEquals(100, Action.Brightness(BrightnessMode.SET, 100, ScreenTarget.BOTTOM).percent)
+        assertEquals(1, Action.Brightness(BrightnessMode.DECREASE, 1, ScreenTarget.TOP).percent)
+        for (bad in listOf(-1, 101)) {
+            val e = assertFailsWith<IllegalArgumentException> {
+                Action.Brightness(BrightnessMode.SET, bad, ScreenTarget.TOP)
+            }
+            assertEquals("The brightness must be between 0 and 100 (got $bad)", e.message)
+        }
+        for (mode in listOf(BrightnessMode.INCREASE, BrightnessMode.DECREASE)) {
+            for (bad in listOf(0, 101)) {
+                val e = assertFailsWith<IllegalArgumentException> {
+                    Action.Brightness(mode, bad, ScreenTarget.FOCUSED)
+                }
+                assertEquals("The step must be between 1 and 100 (got $bad)", e.message)
+            }
+        }
+    }
+
+    @Test
     fun `a shortcut needs an id`() {
         val t = Trigger(setOf(ModifierKey.AYN), setOf(key(304)))
         assertFailsWith<IllegalArgumentException> { Shortcut("", t, Action.SwapScreens) }

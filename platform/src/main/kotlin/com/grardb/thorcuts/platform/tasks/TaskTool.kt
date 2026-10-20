@@ -23,7 +23,7 @@ import com.grardb.thorcuts.core.model.BrightnessMode
  *   … TaskTool focused
  *   … TaskTool close <display|focused> [launcherPkg...]
  *   … TaskTool move <display|focused> <displayA> <displayB>
- *   … TaskTool brightness <display> <INCREASE|DECREASE|SET> <percent>
+ *   … TaskTool brightness <display|both> <INCREASE|DECREASE|SET> <percent>
  *
  * A <display> is an int; `focused` names the display of the window manager's focused
  * root task, resolved here and nowhere else (see [resolveDisplay]). The packages after
@@ -45,8 +45,12 @@ object TaskTool {
     private const val SWAP_USAGE = "usage: $SWAP_ARGS"
     private const val CLOSE_USAGE = "usage: $CLOSE_ARGS"
     private const val MOVE_USAGE = "usage: $MOVE_ARGS"
-    private const val BRIGHTNESS_ARGS = "brightness <display> <INCREASE|DECREASE|SET> <percent>"
+    private const val BRIGHTNESS_ARGS =
+        "brightness <display|both> <INCREASE|DECREASE|SET> <percent>"
     private const val BRIGHTNESS_USAGE = "usage: $BRIGHTNESS_ARGS"
+
+    /** The brightness display argument that means the top then the bottom, in this process. */
+    private const val BOTH = "both"
     private const val USAGE =
         "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $MOVE_ARGS | $BRIGHTNESS_ARGS"
 
@@ -104,7 +108,7 @@ object TaskTool {
                     intArg(args, 3, MOVE_USAGE),
                 )
                 "brightness" -> brightness(
-                    intArg(args, 1, BRIGHTNESS_USAGE),
+                    arg(args, 1, BRIGHTNESS_USAGE),
                     arg(args, 2, BRIGHTNESS_USAGE),
                     intArg(args, 3, BRIGHTNESS_USAGE),
                 )
@@ -386,28 +390,52 @@ object TaskTool {
     }
 
     /**
-     * Step or set one display's brightness (brightness spec §5), the way its slider does:
-     * `IDisplayManager.getBrightness(displayId)` for the user-set level — a float, 0..1, and
-     * both of the Thor's sliders are linear in it (the recon, 2026-10-20) — then
-     * `setBrightness(displayId, float)` with [targetPercent]'s level. Hidden API, so by
-     * reflection; the permission (`CONTROL_DISPLAY_BRIGHTNESS`) is uid 0's. The line is the
-     * display's part of the app's outcome, verbatim: `OK display 4: 35% -> 45%`.
+     * Step or set one display's brightness, or both displays' in this one process (brightness
+     * spec §5), the way each slider does. `both` sets [ThorDisplays.TOP] then
+     * [ThorDisplays.BOTTOM] back to back — the Thor's own quick menu sets them from one process,
+     * and two tool runs lit the top a JVM spawn before the bottom (2026-10-20). One part per
+     * display ([brightnessPart]); the second display is still tried after the first fails, so
+     * a one-sided result reads differently from a failure before anything happened. The line
+     * is the parts in display order: `OK` when all succeeded, `ERR` (exit 1) otherwise.
      */
-    private fun brightness(display: Int, modeArg: String, percent: Int) {
+    private fun brightness(displayArg: String, modeArg: String, percent: Int) {
         val mode = BrightnessMode.entries.firstOrNull { it.name == modeArg }
             ?: fail(2, BRIGHTNESS_USAGE)
+        val displays = if (displayArg == BOTH) listOf(ThorDisplays.TOP, ThorDisplays.BOTTOM)
+        else listOf(displayArg.toIntOrNull() ?: fail(2, BRIGHTNESS_USAGE))
         val dm = displayManager() ?: fail(3, "display service unavailable")
+        val parts = displays.map { display -> brightnessPart(dm, display, mode, percent) }
+        val line = parts.joinToString(", ") { it.second }
+        if (parts.all { it.first }) ok(line) else fail(1, line)
+    }
+
+    /**
+     * One display's part and whether it succeeded: `IDisplayManager.getBrightness(displayId)`
+     * for the user-set level — a float, 0..1, and both of the Thor's sliders are linear in it
+     * (the recon, 2026-10-20) — then `setBrightness(displayId, float)` with [targetPercent]'s
+     * level. Hidden API, so by reflection; the permission (`CONTROL_DISPLAY_BRIGHTNESS`) is uid
+     * 0's. The service answers a display it does not know with its "invalid" float (NaN) and
+     * ignores a write to it, so that is refused rather than read as `0% -> 50%`, done; a
+     * reflective failure is this part's reason, so the other display still gets its turn.
+     */
+    private fun brightnessPart(
+        dm: Any, display: Int, mode: BrightnessMode, percent: Int,
+    ): Pair<Boolean, String> = try {
         val current = dm.javaClass.getMethod("getBrightness", Int::class.javaPrimitiveType)
             .invoke(dm, display) as Float
-        // The service answers a display it does not know with its "invalid" float (NaN) and
-        // ignores a write to it, so without this a wrong id would read as `0% -> 50%`, done.
-        if (current.isNaN()) fail(1, "display $display has no brightness")
-        val from = Math.round(current * 100)
-        val to = targetPercent(mode, from, percent)
-        dm.javaClass.getMethod(
-            "setBrightness", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType,
-        ).invoke(dm, display, to / 100f)
-        ok("display $display: $from% -> $to%")
+        if (current.isNaN()) {
+            false to "display $display: unknown to the display service"
+        } else {
+            val from = Math.round(current * 100)
+            val to = targetPercent(mode, from, percent)
+            dm.javaClass.getMethod(
+                "setBrightness", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType,
+            ).invoke(dm, display, to / 100f)
+            true to "display $display: $from% -> $to%"
+        }
+    } catch (t: Throwable) {
+        // Throwable, as main() does: reflection raises linkage errors too.
+        false to "display $display: ${chain(t)}"
     }
 
     /** The display service, reached as [activityTaskManager] reaches its own. */

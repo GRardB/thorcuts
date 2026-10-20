@@ -1,6 +1,7 @@
 package com.grardb.thorcuts
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.Control
 import com.grardb.thorcuts.core.model.ModifierKey
 import com.grardb.thorcuts.core.model.Scope
@@ -17,34 +18,55 @@ enum class ScopeKind(val label: String) {
     ONLY("Only in…");
 }
 
-/** The six kinds of action the editor offers; four of them aim at a screen, and one of
- *  those opens an app chosen in the picker. */
-enum class ActionKind(val label: String, val takesScreen: Boolean) {
+/** The nine kinds of action the editor offers: seven aim at a screen, one of those opens an
+ *  app chosen in the picker, and the three brightness kinds also take a percent and may aim
+ *  at both screens at once. */
+enum class ActionKind(
+    val label: String,
+    val takesScreen: Boolean,
+    /** The three brightness kinds: a `Percent` field under the select. */
+    val takesPercent: Boolean = false,
+) {
     SWAP("Swap the screens", false),
     MOVE("Move the focused app to the other screen", false),
     CLOSE("Close the app on", true),
     HOME("Go home on", true),
     OPEN("Open an app", true),
-    SHOT("Take a screenshot of", true);
+    SHOT("Take a screenshot of", true),
+    BRIGHTER("Increase brightness by", true, takesPercent = true),
+    DIMMER("Decrease brightness by", true, takesPercent = true),
+    BRIGHTNESS("Set brightness to", true, takesPercent = true);
 
     /** The editor's select: an action that aims at a screen trails an ellipsis, since its
-     *  screen (and its app) is the choice beneath it; the list's [Action.label]
-     *  completes it. */
+     *  screen (and its app, or its percent) is the choice beneath it; the list's
+     *  [Action.label] completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
 
-    /** The screen radios this kind offers, in the editor's order. BOTH is for an action that
-     *  takes it (the model refuses it on the rest); none does yet. */
-    val screens: List<ScreenTarget> get() = ScreenTarget.entries - ScreenTarget.BOTH
+    /** Only the brightness kinds aim at both screens at once: the model refuses BOTH on the
+     *  rest, so the radio is not offered for them. */
+    val allowsBoth: Boolean get() = takesPercent
 
-    /** The action, from the nested choices: [screen] for the four that aim at one, [app]
-     *  (a package) for [OPEN] — refused with `Choose an app` when there is none. */
-    fun action(screen: ScreenTarget, app: String?): Action = when (this) {
-        SWAP -> Action.SwapScreens
-        MOVE -> Action.MoveFocusedToOtherScreen
-        CLOSE -> Action.CloseScreen(screen)
-        HOME -> Action.GoHome(screen)
-        OPEN -> Action.OpenApp(app ?: throw IllegalArgumentException(Copy.CHOOSE_APP), screen)
-        SHOT -> Action.TakeScreenshot(screen)
+    /** The screen radios this kind offers, in the editor's order. */
+    val screens: List<ScreenTarget>
+        get() = if (allowsBoth) ScreenTarget.entries else ScreenTarget.entries - ScreenTarget.BOTH
+
+    /** The action, from the nested choices: [screen] for the kinds that aim at one, [app]
+     *  (a package) for [OPEN] — refused with `Choose an app` when there is none — and
+     *  [percent] for the three brightness kinds, refused with [Copy.PERCENT_NUMBER] when
+     *  the draft could not read one. */
+    fun action(screen: ScreenTarget, app: String?, percent: Int?): Action {
+        fun pct(): Int = percent ?: throw IllegalArgumentException(Copy.PERCENT_NUMBER)
+        return when (this) {
+            SWAP -> Action.SwapScreens
+            MOVE -> Action.MoveFocusedToOtherScreen
+            CLOSE -> Action.CloseScreen(screen)
+            HOME -> Action.GoHome(screen)
+            OPEN -> Action.OpenApp(app ?: throw IllegalArgumentException(Copy.CHOOSE_APP), screen)
+            SHOT -> Action.TakeScreenshot(screen)
+            BRIGHTER -> Action.Brightness(BrightnessMode.INCREASE, pct(), screen)
+            DIMMER -> Action.Brightness(BrightnessMode.DECREASE, pct(), screen)
+            BRIGHTNESS -> Action.Brightness(BrightnessMode.SET, pct(), screen)
+        }
     }
 
     companion object {
@@ -55,6 +77,11 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
             is Action.GoHome -> HOME
             is Action.OpenApp -> OPEN
             is Action.TakeScreenshot -> SHOT
+            is Action.Brightness -> when (action.mode) {
+                BrightnessMode.INCREASE -> BRIGHTER
+                BrightnessMode.DECREASE -> DIMMER
+                BrightnessMode.SET -> BRIGHTNESS
+            }
         }
 
         fun screenOf(action: Action): ScreenTarget? = when (action) {
@@ -62,10 +89,13 @@ enum class ActionKind(val label: String, val takesScreen: Boolean) {
             is Action.GoHome -> action.screen
             is Action.OpenApp -> action.screen
             is Action.TakeScreenshot -> action.screen
+            is Action.Brightness -> action.screen
             else -> null
         }
 
         fun appOf(action: Action): String? = (action as? Action.OpenApp)?.packageName
+
+        fun percentOf(action: Action): Int? = (action as? Action.Brightness)?.percent
     }
 }
 
@@ -92,12 +122,17 @@ fun ScreenTarget.choiceLabel(): String = when (this) {
 
 /** An action as the list names it: "Close the app on the focused screen", "Open Dolphin on
  *  the bottom screen" ([labels]: package → label, the list's; the package when it is not
- *  installed). */
+ *  installed), "Increase brightness by 10% on both screens". */
 fun Action.label(labels: Map<String, String> = emptyMap()): String {
     val kind = ActionKind.of(this)
     val screen = ActionKind.screenOf(this) ?: return kind.label
     val app = ActionKind.appOf(this)?.let { labels[it] ?: it }
-    return if (app != null) "Open $app on ${screen.label()}" else "${kind.label} ${screen.label()}"
+    val percent = ActionKind.percentOf(this)
+    return when {
+        app != null -> "Open $app on ${screen.label()}"
+        percent != null -> "${kind.label} $percent% on ${screen.label()}"
+        else -> "${kind.label} ${screen.label()}"
+    }
 }
 
 /** One line for a scope that is not a plain Global(), null for one: the apps by name
@@ -129,13 +164,15 @@ object Copy {
     const val NO_APPS = "No apps chosen yet"
     const val NO_APP = "No app chosen yet"
     const val CHOOSE_APP = "Choose an app"
+    const val PERCENT_NUMBER = "The percent must be a whole number"
     const val LATE = "With a timer, this combo reaches the app in front only after the timer " +
         "or the release — it will feel late there."
 }
 
 /**
- * What the editor holds while a shortcut is being added or edited. The model's rules are not
- * repeated here: [trigger] and [toShortcut] build the real values and throw the model's own
+ * What the editor holds while a shortcut is being added or edited (since 2026-10-20, a brightness
+ * kind's percent too). The model's rules are not repeated here: [trigger] and [toShortcut]
+ * build the real values and throw the model's own
  * messages, and they are called only where a throw is caught — inside the edit lambda the
  * ViewModel hands the coordinator (a `Rejected(reason)` under Save) and under `runCatching`
  * for the warnings.
@@ -153,6 +190,8 @@ data class EditorDraft(
     val screen: ScreenTarget = ScreenTarget.FOCUSED,
     /** The package an [ActionKind.OPEN] opens; null until chosen, ignored for the rest. */
     val openApp: String? = null,
+    /** The percent a brightness kind takes, as typed; ignored for the rest. */
+    val percent: String = DEFAULT_PERCENT,
     val scope: ScopeKind = ScopeKind.EVERYWHERE,
     /** The packages the scope names: the exclusions for [ScopeKind.EXCEPT], the inclusions
      *  for [ScopeKind.ONLY], ignored for [ScopeKind.EVERYWHERE]. */
@@ -181,9 +220,27 @@ data class EditorDraft(
     fun toShortcut(): Shortcut = Shortcut(
         id = id.trim(),
         trigger = trigger(),
-        action = action.action(screen, openApp),
+        action = action.action(screen, openApp, percentValue()),
         scope = toScope(),
         enabled = original?.enabled ?: true,
+    )
+
+    /** The percent the draft's brightness kind takes, or null for a kind that takes none; a
+     *  throw with the editor's message when the text is not a whole number. The model's
+     *  ranges are not repeated: `Brightness`'s `init` throws them. */
+    private fun percentValue(): Int? {
+        if (!action.takesPercent) return null
+        return percent.trim().toIntOrNull()
+            ?: throw IllegalArgumentException(Copy.PERCENT_NUMBER)
+    }
+
+    /** The draft with [kind] chosen. A kind that cannot aim at both screens moves a `Both
+     *  screens` choice back to the focused one: its radio is hidden for that kind, and a
+     *  hidden radio must not refuse a save. */
+    fun withAction(kind: ActionKind): EditorDraft = copy(
+        action = kind,
+        screen = if (screen == ScreenTarget.BOTH && !kind.allowsBoth) ScreenTarget.FOCUSED
+        else screen,
     )
 
     /** The scope the draft describes, or a throw when an app list is empty. The model refuses
@@ -209,6 +266,9 @@ data class EditorDraft(
         }
 
     companion object {
+        /** A new brightness shortcut's percent: a sensible step. */
+        const val DEFAULT_PERCENT = "10"
+
         fun of(s: Shortcut) = EditorDraft(
             original = s,
             id = s.id,
@@ -219,6 +279,7 @@ data class EditorDraft(
             action = ActionKind.of(s.action),
             screen = ActionKind.screenOf(s.action) ?: ScreenTarget.FOCUSED,
             openApp = ActionKind.appOf(s.action),
+            percent = ActionKind.percentOf(s.action)?.toString() ?: DEFAULT_PERCENT,
             scope = scopeKindOf(s.scope),
             apps = appsOf(s.scope),
         )

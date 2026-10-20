@@ -1,6 +1,7 @@
 package com.grardb.thorcuts.platform.actions
 
 import com.grardb.thorcuts.core.model.Action
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.platform.privilege.FakeGateway
 import com.grardb.thorcuts.platform.privilege.FakeGateway.Call
@@ -100,5 +101,25 @@ class ActionDispatcherTest {
         assertEquals(1, g.calls.size)
         assertTrue((g.calls.single() as Call.Script).lines.first().startsWith("screencap -p -d 4630946482288158084 "))
         assertEquals(1, shots.saves)
+    }
+
+    @Test
+    fun `Brightness runs the tool's brightness on the chosen display`() {
+        val g = FakeGateway("OK display 4: 60% -> 50%")
+        assertEquals(
+            "OK display 4: 60% -> 50%",
+            dispatcher(g).dispatch(Action.Brightness(BrightnessMode.SET, 50, ScreenTarget.BOTTOM)),
+        )
+        assertEquals(listOf(entryPoint("brightness", "4", "SET", "50")), g.calls)
+    }
+
+    @Test
+    fun `Brightness on both screens runs the tool once with the both word`() {
+        val g = FakeGateway("OK display 0: 35% -> 45%, display 4: 20% -> 30%")
+        assertEquals(
+            "OK display 0: 35% -> 45%, display 4: 20% -> 30%",
+            dispatcher(g).dispatch(Action.Brightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH)),
+        )
+        assertEquals(listOf(entryPoint("brightness", "both", "INCREASE", "10")), g.calls)
     }
 }

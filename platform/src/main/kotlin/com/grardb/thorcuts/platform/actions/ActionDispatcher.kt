@@ -21,5 +21,7 @@ class ActionDispatcher(private val tasks: TaskActions) {
         is Action.GoHome -> tasks.goHome(action.screen)
         is Action.OpenApp -> tasks.openApp(action.packageName, action.screen)
         is Action.TakeScreenshot -> tasks.takeScreenshot(action.screen)
+        is Action.Brightness ->
+            tasks.changeBrightness(action.mode, action.percent, action.screen)
     }
 }

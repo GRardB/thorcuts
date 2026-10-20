@@ -157,37 +157,28 @@ class TaskActions(
     }
 
     /**
-     * Step or set [screen]'s brightness (brightness spec §4-5): the tool's `brightness <id>
-     * <mode> <percent>` once per display, which reads that display's level from the display
-     * service, applies the step or the level, clamps, and writes it back — the path both
-     * sliders use. FOCUSED asks the tool which display holds focus first, as [openApp] does.
-     * BOTH runs display 0 then 4 and folds the two parts into one line, trying the second
-     * even when the first failed: a one-sided result and a failure before anything read
-     * differently (the swap's rule). Each part is the tool's line after its `OK ` — or
-     * `display <id>: <its reason>` after an `ERR `, so a no-reply or a blank reply names
-     * its display too.
+     * Step or set [screen]'s brightness (brightness spec §4-5): the tool's `brightness
+     * <display|both> <mode> <percent>`, ONE round trip whichever screen. The tool reads the
+     * level from the display service, applies the step or the level, clamps, writes it back —
+     * and for `both` does the two displays back to back inside its one process, so they change
+     * together (two round trips lit the top a JVM spawn before the bottom, 2026-10-20). FOCUSED
+     * asks the tool which display holds focus first, as [openApp] does. The tool's line is
+     * returned verbatim: one part per display, `display <id>: <from>% -> <to>%` or `display
+     * <id>: <reason>`, `OK` when every part succeeded and `ERR` otherwise.
      */
     fun changeBrightness(mode: BrightnessMode, percent: Int, screen: ScreenTarget): String {
-        val displays = when (screen) {
-            ScreenTarget.TOP -> listOf(TOP)
-            ScreenTarget.BOTTOM -> listOf(BOTTOM)
-            ScreenTarget.BOTH -> listOf(TOP, BOTTOM)
+        val display = when (screen) {
+            ScreenTarget.TOP -> TOP
+            ScreenTarget.BOTTOM -> BOTTOM
+            ScreenTarget.BOTH -> BOTH_DISPLAYS
             ScreenTarget.FOCUSED -> {
                 val d = focusedDisplay()
                 if (d.startsWith("ERR ")) return d
                 if (d != TOP && d != BOTTOM) return "ERR unexpected focused display $d"
-                listOf(d)
+                d
             }
         }
-        val results = displays.map { id ->
-            id to tool("brightness", id, mode.name, percent.toString())
-        }
-        val failed = results.any { (_, line) -> !line.startsWith("OK ") }
-        val parts = results.map { (id, line) ->
-            if (line.startsWith("OK ")) line.removePrefix("OK ")
-            else "display $id: ${line.removePrefix("ERR ")}"
-        }
-        return (if (failed) "ERR " else "OK ") + parts.joinToString(", ")
+        return tool("brightness", display, mode.name, percent.toString())
     }
 
     /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
@@ -261,6 +252,9 @@ class TaskActions(
 
         /** The tool's word for "the display that holds input focus". */
         const val FOCUSED = "focused"
+
+        /** The tool's word for "the top then the bottom, in one process" (brightness only). */
+        const val BOTH_DISPLAYS = "both"
         val TOP = ThorDisplays.TOP.toString()
         val BOTTOM = ThorDisplays.BOTTOM.toString()
 

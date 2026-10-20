@@ -63,6 +63,15 @@
         "modifiers": ["BACK"]
       },
       "id": "shot-bottom"
+    },
+    {
+      "action": { "percent": 10, "screen": "BOTH", "kind": "Brightness", "mode": "INCREASE" },
+      "id": "brighter-both",
+      "trigger": {
+        "modifiers": ["AYN"],
+        "buttons": [ { "type": "ABS", "device": "PAD", "value": -1, "code": 17 } ],
+        "style": "PRESS"
+      }
     }
   ],
   "theme": { "dark": true },
