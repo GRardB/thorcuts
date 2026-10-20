@@ -1,5 +1,6 @@
 package com.grardb.thorcuts.platform.tasks
 
+import com.grardb.thorcuts.core.model.BrightnessMode
 import com.grardb.thorcuts.core.model.ScreenTarget
 import com.grardb.thorcuts.core.safety.CommandSafety
 import com.grardb.thorcuts.platform.privilege.PrivilegeGateway
@@ -153,6 +154,40 @@ class TaskActions(
         // The model refuses BOTH on this action (brightness spec §2); the branch is the
         // compiler's, not a path.
         ScreenTarget.BOTH -> error("TakeScreenshot cannot aim at both screens")
+    }
+
+    /**
+     * Step or set [screen]'s brightness (brightness spec §4-5): the tool's `brightness <id>
+     * <mode> <percent>` once per display, which reads that display's level from the display
+     * service, applies the step or the level, clamps, and writes it back — the path both
+     * sliders use. FOCUSED asks the tool which display holds focus first, as [openApp] does.
+     * BOTH runs display 0 then 4 and folds the two parts into one line, trying the second
+     * even when the first failed: a one-sided result and a failure before anything read
+     * differently (the swap's rule). Each part is the tool's line after its `OK ` — or
+     * `display <id>: <its reason>` after an `ERR `, so a no-reply or a blank reply names
+     * its display too.
+     */
+    fun changeBrightness(mode: BrightnessMode, percent: Int, screen: ScreenTarget): String {
+        val displays = when (screen) {
+            ScreenTarget.TOP -> listOf(TOP)
+            ScreenTarget.BOTTOM -> listOf(BOTTOM)
+            ScreenTarget.BOTH -> listOf(TOP, BOTTOM)
+            ScreenTarget.FOCUSED -> {
+                val d = focusedDisplay()
+                if (d.startsWith("ERR ")) return d
+                if (d != TOP && d != BOTTOM) return "ERR unexpected focused display $d"
+                listOf(d)
+            }
+        }
+        val results = displays.map { id ->
+            id to tool("brightness", id, mode.name, percent.toString())
+        }
+        val failed = results.any { (_, line) -> !line.startsWith("OK ") }
+        val parts = results.map { (id, line) ->
+            if (line.startsWith("OK ")) line.removePrefix("OK ")
+            else "display $id: ${line.removePrefix("ERR ")}"
+        }
+        return (if (failed) "ERR " else "OK ") + parts.joinToString(", ")
     }
 
     /** The system's screenshot: `input` prints nothing on success, its usage on a bad key. */
