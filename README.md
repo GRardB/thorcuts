@@ -124,6 +124,9 @@ storage, and nothing leaves the device unless you export it.
   over, and the launcher fills the screen it left. Closing an app shows the launcher; a screen
   is never left blank.
 - Closing all apps on a screen leaves a picture-in-picture window where it is.
+- If the Thor shows the keyboard on the bottom screen, closing a bottom-screen app with a
+  shortcut after typing in it and then touching the top screen can keep the keyboard from
+  reopening until you open any app on the bottom screen again.
 
 ## Building from source
 
