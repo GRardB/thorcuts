@@ -85,7 +85,7 @@ class EditorDraftTest {
         assertEquals("Top screen", ScreenTarget.TOP.choiceLabel())
         assertEquals("Bottom screen", ScreenTarget.BOTTOM.choiceLabel())
         assertEquals(
-            "Focused screen — the one you last touched or that last took input",
+            "Focused screen — the one Focus Mode locks to, or the last touched on Auto-lock",
             ScreenTarget.FOCUSED.choiceLabel(),
         )
         assertEquals("the focused screen", ScreenTarget.FOCUSED.label())   // mid-sentence

@@ -152,7 +152,7 @@ fun Scope.line(labels: Map<String, String> = emptyMap()): String? {
 }
 
 const val FOCUSED_EXPLAINED =
-    "Focused screen — the one you last touched or that last took input"
+    "Focused screen — the one Focus Mode locks to, or the last touched on Auto-lock"
 
 /** The editor's copy, pinned by the spec. */
 object Copy {

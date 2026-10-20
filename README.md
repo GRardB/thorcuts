@@ -46,8 +46,9 @@ notifications; [The notification](#the-notification) says why.
 4. Choose **Tap** or **Timer**. Tap fires the moment the combo is complete. Timer fires once the
    combo has been held for the milliseconds you set (400 by default).
 5. Choose the action and, where it applies, the screen: the top screen, the bottom screen,
-   whichever screen has focus, or — for brightness and for closing all apps — both. A
-   brightness action also takes a percent.
+   whichever screen has focus (the one the Thor's Focus Mode locks to, or the last touched on
+   Auto-lock), or — for brightness and for closing all apps — both. A brightness action also
+   takes a percent.
 6. Choose where it applies: **Everywhere**, **Everywhere except…** some apps, or **Only in…**
    some apps. The last two need the accessibility service; see
    [Per-app shortcuts](#per-app-shortcuts).
