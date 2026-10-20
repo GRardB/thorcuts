@@ -14,7 +14,7 @@ reads these. Layout: `docs/superpowers/specs/2026-10-13-m2-config-layer-design.m
 output, captured once when each landed and never hand-edited — except that `OpenThorcuts`
 became `OpenApp` with a `package` in the latter two by hand when the action did (2026-10-18),
 and `kitchen-sink.canonical.json` gained its `TakeScreenshot` entry by hand when that action
-landed (2026-10-19) and its `Brightness` entry the same way (2026-10-20); the tests pin that
-the encoder still agrees byte for byte.
+landed (2026-10-19) and its `Brightness` entry and its `CloseAllApps` entry the same way
+(2026-10-20); the tests pin that the encoder still agrees byte for byte.
 `kitchen-sink.json` is the one hand-made file and must stay that way — it is the independent
 derivation the decoder is pinned to.

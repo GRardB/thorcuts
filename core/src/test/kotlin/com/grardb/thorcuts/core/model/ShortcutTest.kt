@@ -96,6 +96,13 @@ class ShortcutTest {
     }
 
     @Test
+    fun `close-all takes any screen, both included`() {
+        for (screen in ScreenTarget.entries) {
+            assertEquals(screen, Action.CloseAllApps(screen).screen)
+        }
+    }
+
+    @Test
     fun `a brightness set is 0 to 100 and a step 1 to 100, on any screen including both`() {
         assertEquals(ScreenTarget.BOTH, Action.Brightness(BrightnessMode.SET, 0, ScreenTarget.BOTH).screen)
         assertEquals(100, Action.Brightness(BrightnessMode.INCREASE, 100, ScreenTarget.TOP).percent)

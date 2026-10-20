@@ -138,12 +138,13 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             }
             state.warning?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
-            // The action is a select: nine choices are too many for radios. What it needs sits
+            // The action is a select: ten choices are too many for radios. What it needs sits
             // flush beneath it — the app an "Open an app" opens, the percent a brightness
             // action takes, then the screen the screen actions aim at ("Both screens" only
-            // for the brightness ones: ActionKind.screens) — in sight the moment the action
-            // is picked, and in the order the list reads it ("Increase brightness by 10% on
-            // both screens"). No indent: a full-width field gives one nothing to hang from.
+            // for the brightness ones and close-all: ActionKind.screens) — in sight the
+            // moment the action is picked, and in the order the list reads it ("Increase
+            // brightness by 10% on both screens"). No indent: a full-width field gives one
+            // nothing to hang from.
             val installed = state.apps.associateBy { it.packageName }
             SectionLabel("Action")
             ActionSelect(selected = draft.action, onSelect = vm::setAction)

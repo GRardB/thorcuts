@@ -18,33 +18,33 @@ enum class ScopeKind(val label: String) {
     ONLY("Only in…");
 }
 
-/** The nine kinds of action the editor offers: seven aim at a screen, one of those opens an
- *  app chosen in the picker, and the three brightness kinds also take a percent and may aim
- *  at both screens at once. */
+/** The ten kinds of action the editor offers: eight aim at a screen, one of those opens an
+ *  app chosen in the picker, the three brightness kinds also take a percent, and those three
+ *  and close-all may aim at both screens at once. */
 enum class ActionKind(
     val label: String,
     val takesScreen: Boolean,
     /** The three brightness kinds: a `Percent` field under the select. */
     val takesPercent: Boolean = false,
+    /** The kinds that aim at both screens at once: the model refuses BOTH on the rest, so
+     *  the radio is not offered for them. */
+    val allowsBoth: Boolean = false,
 ) {
     SWAP("Swap the screens", false),
     MOVE("Move the focused app to the other screen", false),
     CLOSE("Close the app on", true),
+    CLOSE_ALL("Close all apps on", true, allowsBoth = true),
     HOME("Go home on", true),
     OPEN("Open an app", true),
     SHOT("Take a screenshot of", true),
-    BRIGHTER("Increase brightness by", true, takesPercent = true),
-    DIMMER("Decrease brightness by", true, takesPercent = true),
-    BRIGHTNESS("Set brightness to", true, takesPercent = true);
+    BRIGHTER("Increase brightness by", true, takesPercent = true, allowsBoth = true),
+    DIMMER("Decrease brightness by", true, takesPercent = true, allowsBoth = true),
+    BRIGHTNESS("Set brightness to", true, takesPercent = true, allowsBoth = true);
 
     /** The editor's select: an action that aims at a screen trails an ellipsis, since its
      *  screen (and its app, or its percent) is the choice beneath it; the list's
      *  [Action.label] completes it. */
     val choiceLabel: String get() = if (takesScreen) "$label…" else label
-
-    /** Only the brightness kinds aim at both screens at once: the model refuses BOTH on the
-     *  rest, so the radio is not offered for them. */
-    val allowsBoth: Boolean get() = takesPercent
 
     /** The screen radios this kind offers, in the editor's order. */
     val screens: List<ScreenTarget>
@@ -60,6 +60,7 @@ enum class ActionKind(
             SWAP -> Action.SwapScreens
             MOVE -> Action.MoveFocusedToOtherScreen
             CLOSE -> Action.CloseScreen(screen)
+            CLOSE_ALL -> Action.CloseAllApps(screen)
             HOME -> Action.GoHome(screen)
             OPEN -> Action.OpenApp(app ?: throw IllegalArgumentException(Copy.CHOOSE_APP), screen)
             SHOT -> Action.TakeScreenshot(screen)
@@ -74,6 +75,7 @@ enum class ActionKind(
             Action.SwapScreens -> SWAP
             Action.MoveFocusedToOtherScreen -> MOVE
             is Action.CloseScreen -> CLOSE
+            is Action.CloseAllApps -> CLOSE_ALL
             is Action.GoHome -> HOME
             is Action.OpenApp -> OPEN
             is Action.TakeScreenshot -> SHOT
@@ -86,6 +88,7 @@ enum class ActionKind(
 
         fun screenOf(action: Action): ScreenTarget? = when (action) {
             is Action.CloseScreen -> action.screen
+            is Action.CloseAllApps -> action.screen
             is Action.GoHome -> action.screen
             is Action.OpenApp -> action.screen
             is Action.TakeScreenshot -> action.screen

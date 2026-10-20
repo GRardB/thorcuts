@@ -58,6 +58,16 @@ class ActionDispatcherTest {
     }
 
     @Test
+    fun `CloseAllApps runs the tool's closeall on its screen, both included`() {
+        val g = FakeGateway("OK display 0: nothing to close, display 4: closed 2 (com.a, com.b)")
+        assertEquals(
+            "OK display 0: nothing to close, display 4: closed 2 (com.a, com.b)",
+            dispatcher(g).dispatch(Action.CloseAllApps(ScreenTarget.BOTH)),
+        )
+        assertEquals(listOf(entryPoint("closeall", "both", "c.home")), g.calls)
+    }
+
+    @Test
     fun `GoHome sends a Home key for its screen`() {
         val g = FakeGateway("")
         assertEquals(

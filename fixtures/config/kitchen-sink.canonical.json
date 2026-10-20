@@ -202,6 +202,32 @@
         "kind": "Global",
         "excluded": []
       }
+    },
+    {
+      "id": "close-all-both",
+      "enabled": true,
+      "trigger": {
+        "modifiers": [
+          "AYN"
+        ],
+        "buttons": [
+          {
+            "device": "PAD",
+            "type": "KEY",
+            "code": 312,
+            "value": 1
+          }
+        ],
+        "style": "PRESS"
+      },
+      "action": {
+        "kind": "CloseAllApps",
+        "screen": "BOTH"
+      },
+      "scope": {
+        "kind": "Global",
+        "excluded": []
+      }
     }
   ],
   "theme": {

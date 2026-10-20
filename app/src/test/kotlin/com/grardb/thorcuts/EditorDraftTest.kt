@@ -169,7 +169,7 @@ class EditorDraftTest {
         assertNull(back.openApp)
         assertEquals("Take a screenshot of…", ActionKind.SHOT.choiceLabel)
         assertEquals("Take a screenshot of the bottom screen", s.action.label())
-        assertEquals(5, ActionKind.entries.indexOf(ActionKind.SHOT))   // sixth in the editor
+        assertEquals(6, ActionKind.entries.indexOf(ActionKind.SHOT))   // seventh in the editor
     }
 
     @Test
@@ -181,14 +181,15 @@ class EditorDraftTest {
     }
 
     @Test
-    fun `both screens is named in the list and the editor, and only the brightness kinds offer it`() {
+    fun `both screens is named in the list and the editor, and only the brightness kinds and close-all offer it`() {
         assertEquals("both screens", ScreenTarget.BOTH.label())
         assertEquals("Both screens", ScreenTarget.BOTH.choiceLabel())
         val bright = setOf(ActionKind.BRIGHTER, ActionKind.DIMMER, ActionKind.BRIGHTNESS)
+        val both = bright + ActionKind.CLOSE_ALL
         for (kind in ActionKind.entries) {
             assertEquals(kind in bright, kind.takesPercent, kind.name)
-            assertEquals(kind in bright, kind.allowsBoth, kind.name)
-            assertEquals(kind in bright, ScreenTarget.BOTH in kind.screens, kind.name)
+            assertEquals(kind in both, kind.allowsBoth, kind.name)
+            assertEquals(kind in both, ScreenTarget.BOTH in kind.screens, kind.name)
             assertEquals(
                 listOf(ScreenTarget.TOP, ScreenTarget.BOTTOM, ScreenTarget.FOCUSED),
                 kind.screens.take(3),
@@ -202,6 +203,32 @@ class EditorDraftTest {
         assertEquals("Increase brightness by…", ActionKind.BRIGHTER.choiceLabel)
         assertEquals("Decrease brightness by…", ActionKind.DIMMER.choiceLabel)
         assertEquals("Set brightness to…", ActionKind.BRIGHTNESS.choiceLabel)
+    }
+
+    @Test
+    fun `a close-all action round-trips with its screen, both included, names no app, and sits after the single close`() {
+        for (screen in ScreenTarget.entries) {
+            val s = base().copy(action = ActionKind.CLOSE_ALL, screen = screen).toShortcut()
+            assertEquals(Action.CloseAllApps(screen), s.action)
+            val back = EditorDraft.of(s)
+            assertEquals(ActionKind.CLOSE_ALL, back.action)
+            assertEquals(screen, back.screen)
+            assertNull(back.openApp)
+            assertEquals("10", back.percent)
+        }
+        assertEquals("Close all apps on…", ActionKind.CLOSE_ALL.choiceLabel)
+        assertEquals(
+            "Close all apps on both screens",
+            Action.CloseAllApps(ScreenTarget.BOTH).label(),
+        )
+        assertEquals(
+            "Close all apps on the focused screen",
+            Action.CloseAllApps(ScreenTarget.FOCUSED).label(),
+        )
+        assertEquals(
+            ActionKind.entries.indexOf(ActionKind.CLOSE) + 1,
+            ActionKind.entries.indexOf(ActionKind.CLOSE_ALL),
+        )
     }
 
     @Test
@@ -262,6 +289,10 @@ class EditorDraftTest {
         assertEquals(ActionKind.CLOSE, both.withAction(ActionKind.CLOSE).action)
         val top = base().copy(action = ActionKind.BRIGHTER, screen = ScreenTarget.TOP)
         assertEquals(ScreenTarget.TOP, top.withAction(ActionKind.HOME).screen)
+        val all = base().copy(action = ActionKind.CLOSE_ALL, screen = ScreenTarget.BOTH)
+        assertEquals(ScreenTarget.BOTH, all.withAction(ActionKind.BRIGHTER).screen)
+        assertEquals(ScreenTarget.FOCUSED, all.withAction(ActionKind.CLOSE).screen)
+        assertEquals(ScreenTarget.BOTH, both.withAction(ActionKind.CLOSE_ALL).screen)
         assertEquals("stale", base().copy(error = "stale").withAction(ActionKind.CLOSE).error)
     }
 

@@ -46,9 +46,10 @@ data class Trigger(
 /**
  * Which screen an action aims at. FOCUSED is resolved when the action RUNS, from the
  * window state at that moment: a fired rule arrives with no screen context of its own.
- * BOTH is both screens, each on its own; only an action that says so takes it — the four
- * screen actions below refuse it in their `init`, so a hand-written file cannot aim them at
- * both (brightness spec, 2026-10-20).
+ * BOTH is both screens, each on its own; only an action that says so takes it —
+ * [Action.Brightness] and [Action.CloseAllApps] — and the four screen actions below refuse
+ * it in their `init`, so a hand-written file cannot aim them at both (brightness spec,
+ * 2026-10-20).
  */
 enum class ScreenTarget { TOP, BOTTOM, FOCUSED, BOTH }
 
@@ -61,9 +62,9 @@ private fun requireOne(kind: String, screen: ScreenTarget) =
     require(screen != ScreenTarget.BOTH) { "$kind cannot aim at both screens" }
 
 /**
- * Parent spec §9's actions, plus M7's screenshot and the brightness action, as data only. Nothing
- * in :core dispatches them; the app resolves a fired rule back to its Shortcut and acts from
- * there. [OpenApp]
+ * Parent spec §9's actions, plus M7's screenshot, the brightness action and close-all, as data
+ * only. Nothing in :core dispatches them; the app resolves a fired rule back to its Shortcut and
+ * acts from there. [OpenApp]
  * generalises what was `OpenThorcuts(screen)` (the follow-ups spec, 2026-10-18): any installed app,
  * by package, on a screen.
  */
@@ -97,9 +98,9 @@ sealed interface Action {
 
     /**
      * Step [screen]'s brightness by [percent] of its slider ([mode] INCREASE or DECREASE), or
-     * set it there (SET) — the brightness spec, 2026-10-20. The only action that takes
-     * [ScreenTarget.BOTH]. The ranges are the slider's; the values reach the root tool as an
-     * integer and an enum name, never as free text.
+     * set it there (SET) — the brightness spec, 2026-10-20. The first action to take
+     * [ScreenTarget.BOTH] (close-all is the other). The ranges are the slider's; the values
+     * reach the root tool as an integer and an enum name, never as free text.
      */
     data class Brightness(
         val mode: BrightnessMode, val percent: Int, val screen: ScreenTarget,
@@ -115,6 +116,14 @@ sealed interface Action {
             }
         }
     }
+
+    /**
+     * Close every app on [screen], or on both screens: the one in front and the ones behind
+     * it (the close-all spec, 2026-10-20). The launcher is not an app here, and stays. The
+     * second action, after [Brightness], that takes [ScreenTarget.BOTH]. Nothing to validate:
+     * no value of this reaches a shell as text.
+     */
+    data class CloseAllApps(val screen: ScreenTarget) : Action
 }
 
 /** Where a shortcut applies (parent spec §10). */

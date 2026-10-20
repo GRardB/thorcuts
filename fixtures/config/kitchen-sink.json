@@ -72,6 +72,15 @@
         "buttons": [ { "type": "ABS", "device": "PAD", "value": -1, "code": 17 } ],
         "style": "PRESS"
       }
+    },
+    {
+      "trigger": {
+        "buttons": [ { "code": 312, "value": 1, "device": "PAD", "type": "KEY" } ],
+        "style": "PRESS",
+        "modifiers": ["AYN"]
+      },
+      "action": { "screen": "BOTH", "kind": "CloseAllApps" },
+      "id": "close-all-both"
     }
   ],
   "theme": { "dark": true },

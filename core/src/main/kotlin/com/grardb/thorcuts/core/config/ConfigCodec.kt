@@ -206,6 +206,7 @@ object ConfigCodec {
         "SwapScreens" to emptySet(),
         "MoveFocusedToOtherScreen" to emptySet(),
         "CloseScreen" to setOf("screen"),
+        "CloseAllApps" to setOf("screen"),
         "GoHome" to setOf("screen"),
         "TakeScreenshot" to setOf("screen"),
         "OpenApp" to setOf("package", "screen"),
@@ -229,6 +230,7 @@ object ConfigCodec {
             "SwapScreens" -> Action.SwapScreens
             "MoveFocusedToOtherScreen" -> Action.MoveFocusedToOtherScreen
             "CloseScreen" -> Action.CloseScreen(screen())
+            "CloseAllApps" -> Action.CloseAllApps(screen())
             "GoHome" -> Action.GoHome(screen())
             "TakeScreenshot" -> Action.TakeScreenshot(screen())
             "OpenApp" -> Action.OpenApp(need("package") { it.asString("package") }, screen())
@@ -295,6 +297,7 @@ object ConfigCodec {
                     Action.SwapScreens -> put("kind", "SwapScreens")
                     Action.MoveFocusedToOtherScreen -> put("kind", "MoveFocusedToOtherScreen")
                     is Action.CloseScreen -> screenAction("CloseScreen", a.screen)
+                    is Action.CloseAllApps -> screenAction("CloseAllApps", a.screen)
                     is Action.GoHome -> screenAction("GoHome", a.screen)
                     is Action.TakeScreenshot -> screenAction("TakeScreenshot", a.screen)
                     is Action.Brightness -> {

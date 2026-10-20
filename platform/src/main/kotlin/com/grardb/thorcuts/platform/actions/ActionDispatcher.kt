@@ -18,6 +18,7 @@ class ActionDispatcher(private val tasks: TaskActions) {
         Action.SwapScreens -> tasks.swapScreens()
         Action.MoveFocusedToOtherScreen -> tasks.moveFocusedToOtherScreen()
         is Action.CloseScreen -> tasks.closeScreen(action.screen)
+        is Action.CloseAllApps -> tasks.closeAllApps(action.screen)
         is Action.GoHome -> tasks.goHome(action.screen)
         is Action.OpenApp -> tasks.openApp(action.packageName, action.screen)
         is Action.TakeScreenshot -> tasks.takeScreenshot(action.screen)

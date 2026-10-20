@@ -174,6 +174,11 @@ val KITCHEN_SINK = ThorcutsConfig(
             ),
             action = Action.Brightness(BrightnessMode.INCREASE, 10, ScreenTarget.BOTH),
         ),
+        Shortcut(
+            id = "close-all-both",
+            trigger = Trigger(setOf(ModifierKey.AYN), setOf(padKey(312))),
+            action = Action.CloseAllApps(ScreenTarget.BOTH),
+        ),
     ),
     unknown = UnknownFields(
         top = mapOf("theme" to buildJsonObject { put("dark", true) }),

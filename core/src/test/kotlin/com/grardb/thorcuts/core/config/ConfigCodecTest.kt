@@ -365,6 +365,16 @@ class ConfigCodecTest {
                 """"kind":"SwapScreens"""",
                 """"kind":"TakeScreenshot","screen":"TOP","package":"a.b"""",
             ) to "TakeScreenshot takes no package",
+            swap.replace(""""kind":"SwapScreens"""", """"kind":"CloseAllApps"""")
+                to "CloseAllApps needs a screen",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"CloseAllApps","screen":"BOTH","package":"a.b"""",
+            ) to "CloseAllApps takes no package",
+            swap.replace(
+                """"kind":"SwapScreens"""",
+                """"kind":"CloseAllApps","screen":"TOP","mode":"SET"""",
+            ) to "CloseAllApps takes no mode",
             swap.replace(
                 """"kind":"SwapScreens"""", """"kind":"Brightness","percent":10,"screen":"TOP"""",
             ) to "Brightness needs a mode",
@@ -459,6 +469,20 @@ class ConfigCodecTest {
         val written = ConfigCodec.encode(c)
         assertTrue("\"kind\": \"TakeScreenshot\"" in written, written)
         assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+    }
+
+    @Test
+    fun `a CloseAllApps round-trips with its screen, both included`() {
+        for (screen in ScreenTarget.entries) {
+            val entry = swap.replace(
+                """"kind":"SwapScreens"""", """"kind":"CloseAllApps","screen":"${screen.name}"""",
+            )
+            val c = ok(file(entry)).config
+            assertEquals(Action.CloseAllApps(screen), c.shortcuts.single().action)
+            val written = ConfigCodec.encode(c)
+            assertTrue("\"kind\": \"CloseAllApps\"" in written, written)
+            assertEquals(DecodeResult.Ok(c, emptyList(), null), ConfigCodec.decode(written))
+        }
     }
 
     @Test
