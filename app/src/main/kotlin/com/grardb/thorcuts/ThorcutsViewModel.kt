@@ -282,6 +282,7 @@ class ThorcutsViewModel(
     fun setTimer(timer: Boolean) = change { it.copy(timer = timer) }
     fun setHoldMs(ms: String) = change { it.copy(holdMs = ms) }
     fun setAction(kind: ActionKind) = change { it.withAction(kind) }
+    fun setPercent(percent: String) = change { it.copy(percent = percent) }
     fun setScreen(screen: ScreenTarget) = change { it.copy(screen = screen) }
 
     /** Every change clears the last refusal: it was about the draft as it was. */

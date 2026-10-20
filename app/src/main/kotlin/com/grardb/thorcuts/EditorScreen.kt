@@ -52,9 +52,9 @@ private val NESTED = 32.dp
 
 /**
  * One shortcut being added or edited: its name (editable on an existing one too: a rename),
- * the recorder, Tap or Timer, the action (a select) and, under it, the app it opens and its
- * screen, where it applies and — nested — the chosen apps, Save / Cancel / Delete (which asks
- * first). Nothing here is privileged. A recording ends with the
+ * the recorder, Tap or Timer, the action (a select) and, under it, the app it opens, its
+ * percent and its screen, where it applies and — nested — the chosen apps, Save / Cancel /
+ * Delete (which asks first). Nothing here is privileged. A recording ends with the
  * combo's release (the ViewModel), on Cancel and Save, on the timeout, and when this screen
  * stops or leaves composition — the gate must not stay shut behind a screen that is gone.
  */
@@ -138,11 +138,12 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
             }
             state.warning?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
-            // The action is a select: six choices are too many for radios. What it needs sits
-            // flush beneath it — the app an "Open an app" opens, then the screen the four
-            // screen actions aim at — in sight the moment the action is picked, and in the
-            // order the list reads it ("Open Dolphin on the bottom screen"). No indent: a
-            // full-width field gives one nothing to hang from.
+            // The action is a select: nine choices are too many for radios. What it needs sits
+            // flush beneath it — the app an "Open an app" opens, the percent a brightness
+            // action takes, then the screen the screen actions aim at ("Both screens" only
+            // for the brightness ones: ActionKind.screens) — in sight the moment the action
+            // is picked, and in the order the list reads it ("Increase brightness by 10% on
+            // both screens"). No indent: a full-width field gives one nothing to hang from.
             val installed = state.apps.associateBy { it.packageName }
             SectionLabel("Action")
             ActionSelect(selected = draft.action, onSelect = vm::setAction)
@@ -158,6 +159,16 @@ fun EditorScreen(state: UiState, draft: EditorDraft, vm: ThorcutsViewModel) {
                     shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Choose app…") }
+            }
+            if (draft.action.takesPercent) {
+                OutlinedTextField(
+                    value = draft.percent,
+                    onValueChange = vm::setPercent,
+                    label = { Text("Percent") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             if (draft.action.takesScreen) {
                 ChoiceGroup {
@@ -298,8 +309,8 @@ private fun ChoiceRow(label: String, selected: Boolean, onSelect: () -> Unit) {
 }
 
 /** The action, as a select: the field reads the chosen one as the menu words it (an ellipsis
- *  on the four that aim at a screen, since that choice follows beneath), and the menu, as wide
- *  as the field, lists the six in the editor's order. The box gives the field the dropdown
+ *  on the seven that aim at a screen, since that choice follows beneath), and the menu, as wide
+ *  as the field, lists the nine in the editor's order. The box gives the field the dropdown
  *  role; `PrimaryNotEditable` makes the whole field the tap target and keeps the keyboard
  *  away. Open or shut is a plain `remember`: a menu is transient. The exposed dropdown is
  *  still experimental in material3 1.4; the opt-in is confined to this one composable. */
