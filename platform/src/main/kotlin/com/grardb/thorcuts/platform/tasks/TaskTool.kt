@@ -22,12 +22,14 @@ import com.grardb.thorcuts.core.model.BrightnessMode
  *   … TaskTool swap <displayA> <displayB>
  *   … TaskTool focused
  *   … TaskTool close <display|focused> [launcherPkg...]
+ *   … TaskTool closeall <display|focused|both> [launcherPkg...]
  *   … TaskTool move <display|focused> <displayA> <displayB>
  *   … TaskTool brightness <display|focused|both> <INCREASE|DECREASE|SET> <percent>
  *
  * A <display> is an int; `focused` names the display of the window manager's focused
  * root task, resolved here and nowhere else (see [resolveDisplay]). The packages after
- * close's screen are the ones it refuses to close: the launchers, resolved by the app.
+ * close's and closeall's screen are the launchers, resolved by the app: close refuses to
+ * close one, closeall skips them.
  *
  * Contract with the caller: the first line matching ^(OK|ERR) is the result.
  * Everything goes to stdout, because the pservice bridge returns stdout only.
@@ -41,18 +43,22 @@ object TaskTool {
 
     private const val SWAP_ARGS = "swap <displayA> <displayB>"
     private const val CLOSE_ARGS = "close <display|focused> [launcherPkg...]"
+    private const val CLOSE_ALL_ARGS = "closeall <display|focused|both> [launcherPkg...]"
     private const val MOVE_ARGS = "move <display|focused> <displayA> <displayB>"
     private const val SWAP_USAGE = "usage: $SWAP_ARGS"
     private const val CLOSE_USAGE = "usage: $CLOSE_ARGS"
+    private const val CLOSE_ALL_USAGE = "usage: $CLOSE_ALL_ARGS"
     private const val MOVE_USAGE = "usage: $MOVE_ARGS"
     private const val BRIGHTNESS_ARGS =
         "brightness <display|focused|both> <INCREASE|DECREASE|SET> <percent>"
     private const val BRIGHTNESS_USAGE = "usage: $BRIGHTNESS_ARGS"
 
-    /** The brightness display argument that means the top then the bottom, in this process. */
+    /** The display argument that means the top then the bottom, in this process: brightness
+     *  and closeall take it. */
     private const val BOTH = "both"
     private const val USAGE =
-        "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $MOVE_ARGS | $BRIGHTNESS_ARGS"
+        "usage: list | $SWAP_ARGS | focused | $CLOSE_ARGS | $CLOSE_ALL_ARGS | $MOVE_ARGS | " +
+            BRIGHTNESS_ARGS
 
     /**
      * `WindowConfiguration.ACTIVITY_TYPE_HOME` — @hide, so written out.
@@ -101,6 +107,7 @@ object TaskTool {
                 "swap" -> swap(atm, intArg(args, 1, SWAP_USAGE), intArg(args, 2, SWAP_USAGE))
                 "focused" -> focused(atm)
                 "close" -> close(atm, arg(args, 1, CLOSE_USAGE), args.drop(2))
+                "closeall" -> closeAll(atm, arg(args, 1, CLOSE_ALL_USAGE), args.drop(2))
                 "move" -> move(
                     atm,
                     arg(args, 1, MOVE_USAGE),
@@ -313,6 +320,17 @@ object TaskTool {
         atm.javaClass.methods.firstOrNull { it.name == "moveRootTaskToDisplay" }
             ?: fail(6, "moveRootTaskToDisplay not found; candidates=" + signatures(atm, "Display"))
 
+    /** `removeTask(int)` by the int parameter, not the count: a one-argument sibling would
+     *  otherwise be picked and fail at invoke. Absent -> ERR naming candidates. Shared by
+     *  [close] and [closeAll]. */
+    private fun removeTaskMethod(atm: Any): java.lang.reflect.Method =
+        atm.javaClass.methods
+            .firstOrNull {
+                it.name == "removeTask" &&
+                    it.parameterTypes.singleOrNull() == Int::class.javaPrimitiveType
+            }
+            ?: fail(6, "removeTask not found; candidates=" + signatures(atm, "remove"))
+
     /**
      * Close the app on a screen: `removeTask` on its root task — unless that app is a
      * launcher. A launcher relaunched as an ordinary task passes [isApp] (Cocoon, measured
@@ -347,18 +365,92 @@ object TaskTool {
         if (names.isEmpty()) fail(18, "cannot name the app on display $display; not closing")
         val launcher = names.firstOrNull { it in launchers }
         if (launcher != null) fail(17, "refusing to close launcher $launcher on display $display")
-        // By the int parameter, not the count: a one-argument sibling would otherwise be
-        // picked here and fail at invoke.
-        val remove = atm.javaClass.methods
-            .firstOrNull {
-                it.name == "removeTask" &&
-                    it.parameterTypes.singleOrNull() == Int::class.javaPrimitiveType
-            }
-            ?: fail(6, "removeTask not found; candidates=" + signatures(atm, "remove"))
+        val remove = removeTaskMethod(atm)
         val removed = remove.invoke(atm, task.taskId) as? Boolean
             ?: fail(12, "removeTask(${task.taskId}) did not return a boolean")
         if (!removed) fail(13, "removeTask(${task.taskId}) returned false")
         ok("closed ${task.taskId}@$display $pkg")
+    }
+
+    /**
+     * Close every app on a screen, or on both (the close-all spec, 2026-10-20): `removeTask`
+     * on each root task on the display that [isAppTask] — the one in front and the ones
+     * behind it, which is why the test is [isApp] without its visibility part — skipping the
+     * launchers by name as [close] refuses them, and skipping any task that names no package
+     * (a destructive call is not made on a guess: [close]'s rule). `both` is [ThorDisplays.TOP]
+     * then [ThorDisplays.BOTTOM] in this one process, as brightness does it; `focused` is the
+     * focused root task's display through [resolveDisplay]. One part per display
+     * ([closeAllPart]); every task still gets its turn after a failure, and the second display
+     * after the first, so a partial result reads differently from a failure before anything
+     * happened. The line is the parts in display order: `OK` when no part has a failure, `ERR`
+     * (exit 1) otherwise. A screen with nothing to close is a success: closing all of nothing
+     * is done. A display this device does not have reads the same — the task list carries no
+     * "unknown display" signal — and only the two measured ids and `focused` ever reach here
+     * from the app. The task list is one snapshot: a task that vanishes before its turn reads
+     * as a `false`, honestly.
+     */
+    private fun closeAll(atm: Any, screen: String, launchers: List<String>) {
+        val displays = if (screen == BOTH) listOf(ThorDisplays.TOP, ThorDisplays.BOTTOM)
+        else listOf(resolveDisplay(atm, screen))
+        val roots = rootTasks(atm)
+        val remove = removeTaskMethod(atm)
+        val parts = displays.map { display ->
+            val tasks = roots.filter { displayOf(it) == display && isAppTask(it) }
+            closeAllPart(atm, remove, tasks, display, launchers)
+        }
+        val line = parts.joinToString(", ") { it.second }
+        if (parts.all { it.first }) ok(line) else fail(1, line)
+    }
+
+    /**
+     * One display's part and whether every removal succeeded. `display <id>: closed <n>
+     * (<pkg>, …)` in the order closed — the list's order, front to back — or `display <id>:
+     * nothing to close` when no task reached `removeTask`, or `display <id>: closed 0` when
+     * every one that did failed; then `, failed <pkg>: <reason>` per failure (`removeTask(N)
+     * returned false`, `… did not return a boolean`, or the exception chain) and `, skipped
+     * <n> unnamed` when that happened, last. A launcher's task is skipped without a word:
+     * "all apps" never meant it. The names are read as [close] reads them — the top and the
+     * base activity's packages — so a launcher task with a foreign activity on top is still
+     * the launcher's.
+     */
+    private fun closeAllPart(
+        atm: Any,
+        remove: java.lang.reflect.Method,
+        tasks: List<android.app.TaskInfo>,
+        display: Int,
+        launchers: List<String>,
+    ): Pair<Boolean, String> {
+        val closed = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        var unnamed = 0
+        for (task in tasks) {
+            val names = listOfNotNull(task.topActivity?.packageName, task.baseActivity?.packageName)
+            if (names.isEmpty()) {
+                unnamed++
+                continue
+            }
+            if (names.any { it in launchers }) continue
+            val pkg = packageOf(task)
+            val reason = try {
+                when (remove.invoke(atm, task.taskId) as? Boolean) {
+                    true -> null
+                    false -> "removeTask(${task.taskId}) returned false"
+                    null -> "removeTask(${task.taskId}) did not return a boolean"
+                }
+            } catch (t: Throwable) {
+                // Throwable, as main() does: reflection raises linkage errors too.
+                chain(t)
+            }
+            if (reason == null) closed += pkg else failed += "failed $pkg: $reason"
+        }
+        val head = when {
+            closed.isNotEmpty() ->
+                "display $display: closed ${closed.size} (${closed.joinToString(", ")})"
+            failed.isEmpty() -> "display $display: nothing to close"
+            else -> "display $display: closed 0"
+        }
+        val tail = failed + (if (unnamed > 0) listOf("skipped $unnamed unnamed") else emptyList())
+        return failed.isEmpty() to (listOf(head) + tail).joinToString(", ")
     }
 
     /**
@@ -753,6 +845,9 @@ object TaskTool {
      * Written for the swap first (the paragraphs below are that record) and reused unchanged
      * by [close] and [move].
      *
+     * [closeAll] takes the task part alone ([isAppTask]): the apps behind the one in front
+     * are the invisible ones, and a picture-in-picture window is still left alone there.
+     *
      * Visible, not the launcher, and not a picture-in-picture window. Both
      * exclusions are not style choices — WindowManager refuses those moves, and
      * refuses them destructively. Measured on the device with root ids in hand,
@@ -817,9 +912,13 @@ object TaskTool {
      * arbitrary pair of tasks to a reparent that destroys what it rejects, and
      * report success.
      */
-    private fun isApp(t: android.app.TaskInfo): Boolean =
-        visibleOf(t) &&
-            ownActivityTypeOf(t) !in NOT_AN_APP &&
+    private fun isApp(t: android.app.TaskInfo): Boolean = visibleOf(t) && isAppTask(t)
+
+    /** The part of [isApp] that is about the task itself, not its visibility: not a home,
+     *  recents, assistant or dream root task, and not pinned. [closeAll] filters by this
+     *  alone, because the apps behind the one in front are exactly the invisible ones. */
+    private fun isAppTask(t: android.app.TaskInfo): Boolean =
+        ownActivityTypeOf(t) !in NOT_AN_APP &&
             ownWindowingModeOf(t) != WINDOWING_MODE_PINNED
 
     private fun packageOf(t: android.app.TaskInfo): String =
