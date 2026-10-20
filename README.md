@@ -7,7 +7,8 @@ Button shortcuts for the AYN Thor. Bind a combo to:
 1. Close the app on a screen
 1. Go home on a screen
 1. Open an app on a screen
-1. Take a screenshot of a screen.
+1. Take a screenshot of a screen
+1. Change a screen's brightness
 
 ![The Shortcuts screen: four shortcuts, each a combo and what it does](assets/shortcuts.png)
 
@@ -43,8 +44,9 @@ notifications; [The notification](#the-notification) says why.
    device.
 4. Choose **Tap** or **Timer**. Tap fires the moment the combo is complete. Timer fires once the
    combo has been held for the milliseconds you set (400 by default).
-5. Choose the action and, where it applies, the screen: the top screen, the bottom screen, or
-   whichever screen has focus.
+5. Choose the action and, where it applies, the screen: the top screen, the bottom screen,
+   whichever screen has focus, or — for brightness — both. A brightness action also takes a
+   percent.
 6. Choose where it applies: **Everywhere**, **Everywhere except…** some apps, or **Only in…**
    some apps. The last two need the accessibility service; see
    [Per-app shortcuts](#per-app-shortcuts).
@@ -96,7 +98,8 @@ Thorcuts stops working.
 The helper takes exclusive control of the controller and re-emits a virtual one, named and
 numbered like the real one, so games keep working and a bound combo never leaks into them.
 Screen actions use the same privileged route; there is no other. A screenshot of the bottom
-screen is the same frame grab Android's own tools use, run the same way.
+screen is the same frame grab Android's own tools use, run the same way. A brightness shortcut
+sets a screen's level the way its slider does, through Android's own per-screen brightness.
 
 Thorcuts declares four Android permissions and nothing else: running a foreground service, its
 special-use type, starting at boot, and posting the notification above. The accessibility
